@@ -29,6 +29,27 @@ RPCS = [
 MPC = "v1.signer-prod.testnet"
 ED25519_DOMAIN = 1
 
+# A JSON-RPC error arrives inside an HTTP 200. Some of those are ANSWERS (the account really is
+# unknown); others are the server declining to answer (rate limit, timeout). Collapsing them makes
+# a throttled read look like a proven failure -- fail-safe, since UNMEASURED never passes, but it
+# would mark a good contract NOT_TRUSTED at judging time. Unrecognised causes are treated as
+# transient on purpose: UNMEASURED is the safe side of that doubt.
+REAL_ANSWER_CAUSES = {
+    "UNKNOWN_ACCOUNT", "UNKNOWN_ACCESS_KEY", "UNKNOWN_BLOCK",
+    "METHOD_NOT_FOUND", "CONTRACT_EXECUTION_ERROR", "INVALID_ACCOUNT",
+}
+
+
+def classify_rpc_error(payload):
+    """-> ("answer", cause) when the node answered, ("transient", cause) when it declined."""
+    err = payload.get("error") or {}
+    cause = ((err.get("cause") or {}).get("name")
+             or err.get("name") or err.get("message") or "UNSPECIFIED")
+    if isinstance(cause, str) and cause.upper() in REAL_ANSWER_CAUSES:
+        return "answer", cause
+    return "transient", cause
+
+
 class Unmeasured(Exception):
     """The answer could not be READ. Distinct from an answer that was read and was wrong -- a
     rate limit or a timeout must never be reported as a pass, and must not be reported as a
@@ -43,7 +64,13 @@ def rpc(method, params, tries=4):
                 req = urllib.request.Request(url, data=body,
                                              headers={"Content-Type":"application/json"})
                 with urllib.request.urlopen(req, timeout=20) as r:
-                    return json.loads(r.read())
+                    payload = json.loads(r.read())
+                    if "error" in payload:
+                        kind, cause = classify_rpc_error(payload)
+                        if kind == "transient":
+                            last = f"{url}: transient {cause}"
+                            continue          # try the next endpoint, then back off
+                    return payload
             except Exception as e:
                 last = f"{url}: {e}"
         if i < tries - 1:
@@ -54,8 +81,10 @@ def view(account, method, args):
     a = base64.b64encode(json.dumps(args).encode()).decode()
     r = rpc("query", {"request_type":"call_function","finality":"final",
                       "account_id":account,"method_name":method,"args_base64":a})
+    if "error" in r:
+        return None          # a real answer: the method or account is not there
     res = r.get("result") or {}
-    if "error" in r or "error" in res or "result" not in res:
+    if "error" in res or "result" not in res:
         return None
     return bytes(res["result"]).decode()
 
@@ -72,7 +101,15 @@ def full_access_count(account):
         return None
     return sum(1 for k in keys if k["access_key"]["permission"] == "FullAccess")
 
-def verify(contract, path, claimed_sender):
+def code_hash(account):
+    r = rpc("query", {"request_type": "view_account", "finality": "final",
+                      "account_id": account})
+    if "error" in r:
+        return None
+    return (r.get("result") or {}).get("code_hash")
+
+
+def verify(contract, path, claimed_sender, pinned_hash=None):
     """Each check returns (name, state, detail) where state is "ok" | "fail" | "unmeasured"."""
     checks = []
     def guard(name, fn):
@@ -111,6 +148,21 @@ def verify(contract, path, claimed_sender):
                     else "policy surface ABSENT")
     guard("D exposes a policy surface (version-independent)", dd)
 
+    # E identifies the actual BYTECODE. D only shows that something policy-SHAPED is deployed, and
+    # a rogue can expose get_agent_policy and get_mpc_contract while signing anything, so D alone
+    # is imitable. (Found by the coordinator reviewing this file.)
+    #
+    # E and C are COUPLED, and that resolves what looks like a contradiction with "probe the
+    # capability, not the version". Pinning an exact build is WRONG for a mutable contract -- it
+    # rejects legitimate upgrades. It is RIGHT here precisely because C proves the code can never
+    # legitimately change again. If C fails, E is decoration; if C holds, E is the identity check.
+    def e():
+        if pinned_hash is None:
+            return False, "UNPINNED -- no expected build hash supplied"
+        h = code_hash(contract)
+        return h == pinned_hash, f"{h} vs pinned {pinned_hash}"
+    guard("E deployed code hash equals the pinned Leash build", e)
+
     return checks
 
 def verdict_of(checks):
@@ -122,11 +174,11 @@ def verdict_of(checks):
         return "UNMEASURED"
     return "TRUSTED"
 
-def report(label, contract, path, claimed_sender, expect_trusted):
+def report(label, contract, path, claimed_sender, expect_trusted, pinned_hash=None):
     print(f"\n--- {label}")
     print(f"    contract {contract}")
     print(f"    sender   {claimed_sender}")
-    checks = verify(contract, path, claimed_sender)
+    checks = verify(contract, path, claimed_sender, pinned_hash)
     for name, state, detail in checks:
         mark = {"ok": "ok  ", "fail": "FAIL", "unmeasured": "UNM "}[state]
         print(f"      {mark}  {name}  [{detail}]")
@@ -137,10 +189,10 @@ def report(label, contract, path, claimed_sender, expect_trusted):
     print(f"    harness expectation {expect_trusted} -> {'PASS' if correct else 'HARNESS FAIL'}")
     return correct, [(n, st) for n, st, _ in checks if st != "ok"]
 
-def cli(contract, path, sender):
+def cli(contract, path, sender, pinned_hash=None):
     """Stable single-shot mode for a counterparty. One machine-readable line, exit 0 only on
     TRUSTED; UNMEASURED exits 2 so a caller can tell "could not read" from "read and wrong"."""
-    checks = verify(contract, path, sender)
+    checks = verify(contract, path, sender, pinned_hash)
     verdict = verdict_of(checks)
     bad = ",".join(n.split()[0] for n, st, _ in checks if st != "ok") or "-"
     print(f"LEASH_VERIFY contract={contract} path={path} sender={sender} "
@@ -149,8 +201,8 @@ def cli(contract, path, sender):
 
 
 def main():
-    if len(sys.argv) == 4:
-        return cli(sys.argv[1], sys.argv[2], sys.argv[3])
+    if len(sys.argv) in (4, 5):
+        return cli(*sys.argv[1:])
     import os
     ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     rd = lambda n: open(os.path.join(ROOT, n)).read().strip()
