@@ -48,6 +48,33 @@ enum Key {
     Agents,
     /// v2: `Policy` with session expiry.
     AgentsV2,
+    /// Bounded ring of decision records. A refusal that reverts leaves no trace, so refusals are
+    /// now RETURNED rather than thrown, and written here on the way out.
+    Log,
+}
+
+/// One decision, kept. `allowed` is the fact; `detail` carries the exact stable refusal string
+/// so a reader never has to re-derive why.
+#[derive(BorshSerialize, near_sdk::borsh::BorshDeserialize, Serialize, Deserialize, Clone, Debug)]
+#[borsh(crate = "near_sdk::borsh")]
+#[serde(crate = "near_sdk::serde")]
+pub struct Record {
+    pub ts_ms: near_sdk::json_types::U64,
+    pub agent: AccountId,
+    pub recipient: alloc::string::String,
+    pub lamports: near_sdk::json_types::U128,
+    pub allowed: bool,
+    pub detail: alloc::string::String,
+}
+
+/// The verdict `request_transfer` hands back. A refusal is an ORDINARY OUTCOME here, not an
+/// exception: panicking would revert the transaction and erase the very record a human wants.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(crate = "near_sdk::serde")]
+pub struct Verdict {
+    pub allowed: bool,
+    /// The stable `LEASH_REFUSED: ...` string when refused, empty when allowed.
+    pub reason: alloc::string::String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -72,6 +99,13 @@ pub struct Leash {
     /// of (this account, path); the harness verifies it independently rather than trusting it.
     solana_address: alloc::string::String,
     agents: IterableMap<AccountId, Policy>,
+    /// Ring buffer, newest appended. Bounded because NEAR charges for storage and an unbounded
+    /// audit log is a slow funding leak, not a feature.
+    log: near_sdk::store::Vector<Record>,
+    log_cap: u32,
+    /// Lifetime counts, which survive the ring dropping old entries.
+    total_allowed: u64,
+    total_refused: u64,
 }
 
 #[near]
@@ -93,6 +127,10 @@ impl Leash {
             derivation_path,
             solana_address,
             agents: IterableMap::new(Key::AgentsV2),
+            log: near_sdk::store::Vector::new(Key::Log),
+            log_cap: 256,
+            total_allowed: 0,
+            total_refused: 0,
         }
     }
 
@@ -140,7 +178,61 @@ impl Leash {
             derivation_path: old.derivation_path,
             solana_address: old.solana_address,
             agents: IterableMap::new(Key::AgentsV2),
+            log: near_sdk::store::Vector::new(Key::Log),
+            log_cap: 256,
+            total_allowed: 0,
+            total_refused: 0,
         }
+    }
+
+    /// Migrate v2 -> v3: `Policy` is unchanged, so the agent map is REUSED rather than rebuilt.
+    /// Only the Leash head gained fields, which is why this one keeps policies and the earlier
+    /// migration could not.
+    #[private]
+    #[init(ignore_state)]
+    pub fn migrate_v3() -> Self {
+        #[derive(near_sdk::borsh::BorshDeserialize)]
+        #[borsh(crate = "near_sdk::borsh")]
+        struct V2 {
+            owner: AccountId,
+            mpc_contract: AccountId,
+            derivation_path: alloc::string::String,
+            solana_address: alloc::string::String,
+            agents: IterableMap<AccountId, Policy>,
+        }
+        let old: V2 = env::state_read().unwrap_or_else(|| env::panic_str("no v2 state"));
+        Self {
+            owner: old.owner,
+            mpc_contract: old.mpc_contract,
+            derivation_path: old.derivation_path,
+            solana_address: old.solana_address,
+            agents: old.agents,
+            log: near_sdk::store::Vector::new(Key::Log),
+            log_cap: 256,
+            total_allowed: 0,
+            total_refused: 0,
+        }
+    }
+
+    fn write_record(&mut self, agent: &AccountId, recipient: &alloc::string::String,
+                    lamports: u128, allowed: bool, detail: alloc::string::String) {
+        if allowed { self.total_allowed += 1 } else { self.total_refused += 1 }
+        // Bounded: drop the oldest when full. `swap_remove(0)` would reorder the ring, so the
+        // whole buffer shifts instead -- correctness over a micro-optimisation on a 256-slot log.
+        if self.log.len() >= self.log_cap {
+            let keep: alloc::vec::Vec<Record> =
+                (1..self.log.len()).filter_map(|i| self.log.get(i).cloned()).collect();
+            self.log.clear();
+            for r in keep { self.log.push(r) }
+        }
+        self.log.push(Record {
+            ts_ms: env::block_timestamp_ms().into(),
+            agent: agent.clone(),
+            recipient: recipient.clone(),
+            lamports: lamports.into(),
+            allowed,
+            detail,
+        });
     }
 
     // ---- owner-only policy administration --------------------------------------------------
@@ -207,7 +299,7 @@ impl Leash {
         recipient: alloc::string::String,
         lamports: near_sdk::json_types::U128,
         recent_blockhash: alloc::string::String,
-    ) -> Promise {
+    ) -> near_sdk::PromiseOrValue<Verdict> {
         let caller = env::predecessor_account_id();
         let known = self.agents.contains_key(&caller);
         let fallback = Policy {
@@ -223,7 +315,15 @@ impl Leash {
         let req = Request { recipient: recipient.clone(), lamports: lamports.0 };
 
         match decide(known, &pol, &req, env::block_timestamp_ms()) {
-            Decision::Refuse(r) => env::panic_str(&refusal_message(&r)),
+            Decision::Refuse(r) => {
+                // RETURNED, not thrown. A panic reverts, and a reverted refusal leaves no record
+                // of the thing a human most wants to see. Nothing has been mutated at this point,
+                // so there is no safety the panic was providing.
+                let reason = refusal_message(&r);
+                self.write_record(&caller, &recipient, lamports.0, false, reason.clone());
+                env::log_str(&reason);
+                near_sdk::PromiseOrValue::Value(Verdict { allowed: false, reason })
+            }
             Decision::Allow { new_spent_in_window, new_window_started_ms } => {
                 // Record the spend BEFORE the async call. NEAR cross-contract calls yield, so a
                 // second request could otherwise pass the same check against a stale total and
@@ -258,7 +358,9 @@ impl Leash {
                 .to_string()
                 .into_bytes();
 
-                Promise::new(self.mpc_contract.clone())
+                self.write_record(&caller, &recipient, lamports.0, true,
+                                  "signature requested".into());
+                near_sdk::PromiseOrValue::Promise(Promise::new(self.mpc_contract.clone())
                     .function_call("sign".to_string(), args, SIGN_DEPOSIT, SIGN_GAS)
                     .then(
                         Promise::new(env::current_account_id()).function_call(
@@ -272,7 +374,7 @@ impl Leash {
                             NearToken::from_yoctonear(0),
                             CALLBACK_GAS,
                         ),
-                    )
+                    ))
             }
         }
     }
@@ -285,14 +387,17 @@ impl Leash {
         agent: AccountId,
         lamports: near_sdk::json_types::U128,
         #[callback_result] result: Result<near_sdk::serde_json::Value, PromiseError>,
-    ) -> bool {
+    ) -> Verdict {
         match result {
-            Ok(_) => true,
+            Ok(_) => Verdict { allowed: true, reason: alloc::string::String::new() },
             Err(_) => {
                 if let Some(p) = self.agents.get_mut(&agent) {
                     p.spent_in_window = p.spent_in_window.saturating_sub(lamports.0);
                 }
-                false
+                let reason: alloc::string::String = "LEASH_SIGN_FAILED: refunded".into();
+                self.write_record(&agent, &alloc::string::String::new(), lamports.0, false,
+                                  reason.clone());
+                Verdict { allowed: false, reason }
             }
         }
     }
@@ -303,6 +408,23 @@ impl Leash {
     pub fn get_owner(&self) -> AccountId { self.owner.clone() }
     pub fn get_derivation_path(&self) -> alloc::string::String { self.derivation_path.clone() }
     pub fn get_mpc_contract(&self) -> AccountId { self.mpc_contract.clone() }
+
+    /// Newest first, capped. The console asks for what it can render, not the whole ring.
+    pub fn get_recent(&self, limit: u32) -> alloc::vec::Vec<Record> {
+        let n = self.log.len();
+        let take = core::cmp::min(limit, n);
+        (0..take).filter_map(|i| self.log.get(n - 1 - i).cloned()).collect()
+    }
+
+    /// Enumerate agents. Without this a console has to be told which agent to show.
+    pub fn list_agents(&self) -> alloc::vec::Vec<AccountId> {
+        self.agents.keys().cloned().collect()
+    }
+
+    /// Lifetime counts, which outlive the ring dropping old entries.
+    pub fn get_totals(&self) -> (u64, u64, u32) {
+        (self.total_allowed, self.total_refused, self.log.len())
+    }
 
     pub fn get_agent_policy(&self, agent: AccountId) -> Option<PolicyView> {
         self.agents.get(&agent).map(|p| PolicyView {

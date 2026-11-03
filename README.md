@@ -114,6 +114,8 @@ Targets NEAR **testnet** (`v1.signer-prod.testnet`).
 | Live Ed25519 signature from the MPC | **executed and cryptographically verified** |
 | Transfer landed on Solana devnet | **yes** — finalized in 2 s, payee received exactly 1,000,000 lamports |
 | Refusals proven against the live contract | `harness/prove_the_jail.py` |
+| Refusals recorded on chain | **yes** — returned as a verdict and written to a bounded ring, not reverted |
+| Agent enumeration + lifetime counters | `list_agents`, `get_totals`, `get_recent` |
 | Locked-account proof | **done, 15/15** — attack demonstrated on an unlocked account, refused by the chain on a locked one |
 | Session expiry | live, two-sided, mutation-checked |
 | Function-call-key layer | two locks in series, two-sided |

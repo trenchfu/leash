@@ -133,6 +133,36 @@ the function-call-key test above, and it is closed here.
    fail. It now derives both halves from the recorded arms and prints `INCOMPLETE -- do not quote
    this as a proof` when either is missing.
 
+## Refusals are now recorded, not reverted (2026-11-03)
+
+The keystone gap. A refused transfer used to `panic`, which reverts — erasing the one thing a human
+most wants from an agent wallet: *what was stopped*. Checked before changing it: the refusal
+happens **before any state mutation** (the spend is only recorded on the allow branch), so the panic
+was purely an error channel and was protecting nothing.
+
+Refusals are now an **ordinary returned outcome**:
+
+```
+{"allowed": false, "reason": "LEASH_REFUSED: over per-tx limit (limit 100000000, requested 500000000)"}
+```
+
+The transaction succeeds, the reason is logged, and a `Record` is written. Verified live —
+`get_totals` → **1 allowed, 3 refused, 4 logged**; `get_recent` returns newest-first with the exact
+stable strings. The log is a **bounded ring (256)** because NEAR charges for storage and an
+unbounded audit log is a slow funding leak, not a feature; lifetime counters outlive the ring.
+
+`list_agents` and `get_totals` landed in the same migration, since a console that enumerates agents
+wants their history too.
+
+**v3 migration kept the policies**, unlike v2. `Policy` was unchanged this time, so the agent map
+was **reused** rather than rebuilt — only the Leash head gained fields. That is why v2 had to drop
+agent policies and v3 did not, and it is worth stating because "a migration dropped state" is a
+property of *what changed*, not of migrations.
+
+**What this unlocks, which is why it was built first:** a real audit surface for the console, a
+reason to host anything live, per-agent history behind `list_agents`, and any future metering —
+you cannot meter what you do not record.
+
 ## NOT established (stated, not hidden)
 
 - ~~Whether a full-access key defeats the guarantee.~~ **CLOSED** — proven both ways above, 15/15.
