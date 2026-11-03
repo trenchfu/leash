@@ -1,0 +1,6 @@
+target/
+node_modules/
+_vendor-readonly/
+*.wasm
+.env
+neardev/
