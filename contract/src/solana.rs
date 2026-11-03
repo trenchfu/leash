@@ -197,6 +197,34 @@ pub const MEMO_PROGRAM_B58: &str = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"
 pub const DISC_ACCEPT_TASK: [u8; 8] = [222, 196, 79, 165, 120, 30, 38, 120];
 pub const DISC_SUBMIT_EVIDENCE: [u8; 8] = [12, 169, 228, 194, 229, 31, 44, 39];
 
+/// Reject a key set that could make a lamport transfer expressible.
+///
+/// This exists because the "no System Program account" guarantee was NOT structural as first
+/// claimed: `buyer`, `task_escrow` and `config` are supplied by the CALLER, who is the untrusted
+/// agent. An agent passing the System Program as `buyer` puts it in the message, and a lamport
+/// transfer then depends on the target program's own account validation rather than on anything
+/// here. Validating in the builder makes the claim true again.
+///
+/// Two rules, both narrow and both about expressibility, not about trusting any program:
+///   - no key may be the System Program -- it is the only program that can move SOL out of a
+///     plain wallet, and without it in the message no CPI can reach it;
+///   - all keys must be DISTINCT -- duplicates merge, and a merged account carries the union of
+///     its privileges, which is how an aliased read-only slot silently becomes signer+writable.
+///
+/// This is deliberately NOT a general denylist of native programs. Denylists rot, and the only
+/// one that matters for lamports is System.
+fn keys_are_safe(keys: &[[u8; 32]]) -> bool {
+    for (i, k) in keys.iter().enumerate() {
+        if *k == SYSTEM_PROGRAM {
+            return false;
+        }
+        if keys[i + 1..].contains(k) {
+            return false;
+        }
+    }
+    true
+}
+
 /// One instruction's placement in the message: which program, which accounts (by index, in the
 /// IDL's declared order), and its data.
 struct Ix {
@@ -256,6 +284,9 @@ pub fn build_accept_task_message(
     let escrow_prog = decode_pubkey(ESCROW_PROGRAM_B58)?;
     // 0 provider (w,s)  1 task_escrow (w)  2 buyer (ro)  3 config (ro)  4 escrow program (ro)
     let keys = [*provider, *task_escrow, *buyer, *config, escrow_prog];
+    if !keys_are_safe(&keys) {
+        return None;
+    }
     let mut data = Vec::with_capacity(18);
     data.extend_from_slice(&DISC_ACCEPT_TASK);
     data.extend_from_slice(&task_id.to_le_bytes());
@@ -282,7 +313,9 @@ pub fn build_submit_evidence_message(
     let memo_prog = decode_pubkey(MEMO_PROGRAM_B58)?;
     // 0 provider (w,s)  1 task_escrow (w)  2 buyer (ro)  3 escrow prog (ro)  4 memo prog (ro)
     let keys = [*provider, *task_escrow, *buyer, escrow_prog, memo_prog];
-
+    if !keys_are_safe(&keys) {
+        return None;
+    }
     let mut data = Vec::with_capacity(48);
     data.extend_from_slice(&DISC_SUBMIT_EVIDENCE);
     data.extend_from_slice(&task_id.to_le_bytes());
@@ -371,6 +404,40 @@ mod escrow_tests {
         let m = build_submit_evidence_message(&k(1), &k(2), &k(3), 1, ev, &h, &k(9)).unwrap();
         let s = alloc::string::String::from_utf8_lossy(&m).to_string();
         assert_eq!(s.matches(ev).count(), 1, "the evidence appears exactly once, in the memo");
+    }
+
+    #[test]
+    fn system_program_as_a_caller_supplied_account_is_REFUSED() {
+        // The attack: the agent supplies buyer, so it can put the System Program into the
+        // message. With it present, a lamport transfer out of the provider becomes expressible.
+        let sysp = SYSTEM_PROGRAM;
+        assert!(build_accept_task_message(&k(1), &k(2), &sysp, &k(4), 7, 0, &k(9)).is_none(),
+                "System Program as buyer must be refused");
+        assert!(build_accept_task_message(&k(1), &sysp, &k(3), &k(4), 7, 0, &k(9)).is_none(),
+                "System Program as task_escrow must be refused");
+        assert!(build_accept_task_message(&k(1), &k(2), &k(3), &sysp, 7, 0, &k(9)).is_none(),
+                "System Program as config must be refused");
+        assert!(build_submit_evidence_message(&k(1), &k(2), &sysp, 1, "e", &[0u8; 32], &k(9)).is_none(),
+                "System Program as buyer must be refused on the submit leg too");
+    }
+
+    #[test]
+    fn aliasing_the_provider_is_REFUSED() {
+        // Duplicate keys merge and the merged account takes the union of privileges, so a
+        // read-only slot aliased to the writable signer becomes writable+signer.
+        assert!(build_accept_task_message(&k(1), &k(2), &k(1), &k(4), 7, 0, &k(9)).is_none(),
+                "buyer aliased to provider must be refused");
+        assert!(build_accept_task_message(&k(1), &k(1), &k(3), &k(4), 7, 0, &k(9)).is_none(),
+                "task_escrow aliased to provider must be refused");
+        assert!(build_submit_evidence_message(&k(1), &k(2), &k(1), 1, "e", &[0u8; 32], &k(9)).is_none(),
+                "aliasing must be refused on the submit leg too");
+    }
+
+    #[test]
+    fn the_honest_case_still_builds() {
+        // Positive control: without it, "everything is refused" would score as safety.
+        assert!(build_accept_task_message(&k(1), &k(2), &k(3), &k(4), 7, 0, &k(9)).is_some());
+        assert!(build_submit_evidence_message(&k(1), &k(2), &k(3), 1, "e", &[0u8; 32], &k(9)).is_some());
     }
 
     #[test]
