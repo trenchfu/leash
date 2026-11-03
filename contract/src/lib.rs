@@ -43,7 +43,11 @@ const DOMAIN_ED25519: u32 = 1;
 #[derive(BorshSerialize, BorshStorageKey)]
 #[borsh(crate = "near_sdk::borsh")]
 enum Key {
+    /// v1 agent records, written before `Policy` gained `expires_at_ms`. Left in place
+    /// deliberately: move-never-delete, and nothing reads them under the new schema.
     Agents,
+    /// v2: `Policy` with session expiry.
+    AgentsV2,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -55,6 +59,7 @@ pub struct PolicyView {
     pub spent_in_window: near_sdk::json_types::U128,
     pub window_started_ms: near_sdk::json_types::U64,
     pub allowed_recipients: alloc::vec::Vec<alloc::string::String>,
+    pub expires_at_ms: near_sdk::json_types::U64,
 }
 
 #[near(contract_state)]
@@ -87,7 +92,54 @@ impl Leash {
             mpc_contract,
             derivation_path,
             solana_address,
-            agents: IterableMap::new(Key::Agents),
+            agents: IterableMap::new(Key::AgentsV2),
+        }
+    }
+
+    /// Migrate state after `Policy` gained `expires_at_ms`.
+    ///
+    /// Adding a field to a Borsh-serialized map VALUE is a breaking change: records written under
+    /// the old layout cannot be deserialized under the new one, and the failure surfaces as a
+    /// panic on first read, not at deploy time. So this does not try to reinterpret them. It
+    /// rebuilds the map under a NEW storage prefix and leaves the old records untouched.
+    ///
+    /// Consequence, stated rather than discovered: **every agent policy must be set again after
+    /// migrating.** An agent whose policy is not re-set is refused as `unknown agent` — the
+    /// failure is closed, which is the only acceptable direction for this to break in.
+    #[private]
+    #[init(ignore_state)]
+    pub fn migrate() -> Self {
+        // The OLD Policy, reproduced exactly as it was before `expires_at_ms` existed. It is
+        // never constructed or read -- it exists only so the old map's TYPE is nameable.
+        #[derive(near_sdk::borsh::BorshSerialize, near_sdk::borsh::BorshDeserialize)]
+        #[borsh(crate = "near_sdk::borsh")]
+        struct OldPolicy {
+            enabled: bool,
+            per_tx_lamports: u128,
+            window_lamports: u128,
+            spent_in_window: u128,
+            window_started_ms: u64,
+            allowed_recipients: alloc::vec::Vec<alloc::string::String>,
+        }
+        #[derive(near_sdk::borsh::BorshDeserialize)]
+        #[borsh(crate = "near_sdk::borsh")]
+        struct OldLeash {
+            owner: AccountId,
+            mpc_contract: AccountId,
+            derivation_path: alloc::string::String,
+            solana_address: alloc::string::String,
+            // Borsh requires the WHOLE buffer to be consumed: omitting this field fails with
+            // "Cannot deserialize the contract state." IterableMap deserializes only its own
+            // metadata, so naming it here does NOT touch a single old record.
+            agents: IterableMap<AccountId, OldPolicy>,
+        }
+        let old: OldLeash = env::state_read().unwrap_or_else(|| env::panic_str("no state to migrate"));
+        Self {
+            owner: old.owner,
+            mpc_contract: old.mpc_contract,
+            derivation_path: old.derivation_path,
+            solana_address: old.solana_address,
+            agents: IterableMap::new(Key::AgentsV2),
         }
     }
 
@@ -103,6 +155,7 @@ impl Leash {
         per_tx_lamports: near_sdk::json_types::U128,
         window_lamports: near_sdk::json_types::U128,
         allowed_recipients: alloc::vec::Vec<alloc::string::String>,
+        expires_at_ms: near_sdk::json_types::U64,
     ) {
         self.assert_owner();
         for r in allowed_recipients.iter() {
@@ -122,8 +175,20 @@ impl Leash {
                 spent_in_window: spent,
                 window_started_ms: started,
                 allowed_recipients,
+                expires_at_ms: expires_at_ms.0,
             },
         );
+    }
+
+    /// Reset an agent's rolling-window spend. Found missing while running the jail harness: the
+    /// harness deliberately spends an agent to its ceiling, and there was no way to undo that
+    /// without deleting the agent. Owner-only, and it does NOT touch limits or the allowlist.
+    pub fn reset_agent_window(&mut self, agent: AccountId) {
+        self.assert_owner();
+        let now = env::block_timestamp_ms();
+        let p = self.agents.get_mut(&agent).unwrap_or_else(|| env::panic_str("unknown agent"));
+        p.spent_in_window = 0;
+        p.window_started_ms = now;
     }
 
     pub fn set_agent_enabled(&mut self, agent: AccountId, enabled: bool) {
@@ -152,6 +217,7 @@ impl Leash {
             spent_in_window: 0,
             window_started_ms: 0,
             allowed_recipients: alloc::vec::Vec::new(),
+            expires_at_ms: 0,
         };
         let pol = self.agents.get(&caller).cloned().unwrap_or(fallback);
         let req = Request { recipient: recipient.clone(), lamports: lamports.0 };
@@ -231,25 +297,6 @@ impl Leash {
         }
     }
 
-    // ---- diagnostic probes (temporary): locate where execution traps -----------------------
-    pub fn dbg_ok(&self) -> alloc::string::String {
-        env::log_str("dbg_ok: reached");
-        "ok".into()
-    }
-    pub fn dbg_panic_static(&self) {
-        env::log_str("dbg_panic_static: before panic");
-        env::panic_str("DBG_STATIC_MESSAGE");
-    }
-    pub fn dbg_panic_alloc(&self) {
-        env::log_str("dbg_panic_alloc: before panic");
-        let m: alloc::string::String = alloc::format!("DBG_ALLOC_{}", 42);
-        env::panic_str(&m);
-    }
-    pub fn dbg_require(&self) {
-        env::log_str("dbg_require: before require");
-        require!(false, "DBG_REQUIRE_MESSAGE");
-    }
-
     // ---- views -------------------------------------------------------------------------------
 
     pub fn get_solana_address(&self) -> alloc::string::String { self.solana_address.clone() }
@@ -265,6 +312,7 @@ impl Leash {
             spent_in_window: p.spent_in_window.into(),
             window_started_ms: p.window_started_ms.into(),
             allowed_recipients: p.allowed_recipients.clone(),
+            expires_at_ms: p.expires_at_ms.into(),
         })
     }
 }
@@ -291,6 +339,9 @@ pub fn refusal_message(r: &Refusal) -> alloc::string::String {
         Refusal::ZeroAmount => "LEASH_REFUSED: zero amount".into(),
         Refusal::RecipientMalformed => "LEASH_REFUSED: recipient malformed".into(),
         Refusal::RecipientNotAllowed => "LEASH_REFUSED: recipient not allowed".into(),
+        Refusal::SessionExpired { expired_at_ms, now_ms } => format!(
+            "LEASH_REFUSED: session expired (expired at {}, now {})", expired_at_ms, now_ms
+        ),
         Refusal::OverPerTxLimit { limit, requested } => {
             format!("LEASH_REFUSED: over per-tx limit (limit {}, requested {})", limit, requested)
         }

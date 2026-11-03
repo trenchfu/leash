@@ -108,7 +108,23 @@ Targets NEAR **testnet** (`v1.signer-prod.testnet`).
 
 | | |
 |---|---|
-| Policy core + Solana message builder | implemented, unit-tested |
-| Contract wiring to `v1.signer` | implemented |
-| Live testnet signature | **not yet executed** — until it is, "the Ed25519 domain is live" means exactly that and no more |
-| Locked-account proof | harness pending |
+| Policy core + Solana message builder | implemented, 14 unit tests, mutation-checked |
+| Contract deployed | `leash-b0c503d6.testnet` |
+| Leash's Solana address | `Gqa8HZcVBJ8oHGbUDCxU1DFVfimNKxF1w3jJY9kx5DUL` |
+| Live Ed25519 signature from the MPC | **executed and cryptographically verified** |
+| Transfer landed on Solana devnet | **yes** — finalized in 2 s, payee received exactly 1,000,000 lamports |
+| Refusals proven against the live contract | `harness/prove_the_jail.py` |
+| Locked-account proof | **not yet** — the property is stated, not demonstrated |
+| Session expiry / function-call-key layer | **not yet** |
+
+### The landed transfer
+
+```
+agent asks ->  policy passes ->  v1.signer (Ed25519, 11-of-16) ->  verified locally ->  devnet
+Leash  0.500000000 -> 0.498995000 SOL   (-1,005,000 = 1,000,000 transfer + 5,000 fee)
+payee  0.000000000 -> 0.001000000 SOL   (+1,000,000, exactly as the policy authorised)
+```
+
+Run it yourself: `harness/land_transfer.py`. It verifies the signature **before** broadcasting —
+never submit bytes you have not checked — and asserts the payee's balance moved by exactly the
+authorised amount, not merely that a transaction succeeded.

@@ -33,6 +33,10 @@ pub struct Policy {
     /// Base58 recipients this agent may pay. EMPTY MEANS NOBODY, never "everybody" — a policy
     /// that fails open is worse than no policy, because it reads as protection.
     pub allowed_recipients: alloc::vec::Vec<String>,
+    /// Session expiry, ms since epoch. A grant with no end date is a grant you forgot you made;
+    /// standing authority is how a compromised agent stays useful to an attacker for months.
+    /// 0 means "no expiry" and is only reachable by an owner who asks for it explicitly.
+    pub expires_at_ms: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -57,6 +61,8 @@ pub enum Refusal {
     RecipientNotAllowed,
     /// Recipient is not a decodable 32-byte Solana address.
     RecipientMalformed,
+    /// The agent's session has passed its expiry.
+    SessionExpired { expired_at_ms: u64, now_ms: u64 },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -77,6 +83,14 @@ pub fn decide(known: bool, p: &Policy, r: &Request, now_ms: u64) -> Decision {
     }
     if !p.enabled {
         return Decision::Refuse(Refusal::AgentDisabled);
+    }
+    // Expiry is checked EARLY and with `>=`: at the stroke of expiry the session is over. An
+    // expired session must not be rescuable by any later check passing.
+    if p.expires_at_ms != 0 && now_ms >= p.expires_at_ms {
+        return Decision::Refuse(Refusal::SessionExpired {
+            expired_at_ms: p.expires_at_ms,
+            now_ms,
+        });
     }
     if r.lamports == 0 {
         return Decision::Refuse(Refusal::ZeroAmount);
@@ -131,6 +145,7 @@ mod tests {
             spent_in_window: 0,
             window_started_ms: 1_000_000,
             allowed_recipients: vec![OK_ADDR.to_string()],
+            expires_at_ms: 0,
         }
     }
     fn req(l: u128) -> Request { Request { recipient: OK_ADDR.to_string(), lamports: l } }
@@ -174,6 +189,9 @@ mod tests {
         let mut p2 = pol(); p2.spent_in_window = 2_000;
         seen.push(refusal_of(decide(true, &p2, &req(1_000), 1_000_000)));
 
+        let mut p3 = pol(); p3.expires_at_ms = 900_000;
+        seen.push(refusal_of(decide(true, &p3, &req(1), 1_000_000)));
+
         // The set entered must equal the full set of variants. If someone adds a Refusal
         // variant and no test for it, this assertion fails and the build stops.
         let all = [
@@ -184,6 +202,7 @@ mod tests {
             Refusal::RecipientNotAllowed,
             Refusal::OverPerTxLimit { limit: 1_000, requested: 1_001 },
             Refusal::OverWindowLimit { limit: 2_500, spent: 2_000, requested: 1_000 },
+            Refusal::SessionExpired { expired_at_ms: 900_000, now_ms: 1_000_000 },
         ];
         assert_eq!(seen.len(), all.len(), "a refusal variant has no test");
         for want in all.iter() {
@@ -231,6 +250,29 @@ mod tests {
         // expired and the spend still counts. The naive subtraction would underflow.
         assert!(matches!(decide(true, &p, &req(1), 1), Decision::Refuse(_)),
                 "a backwards clock must not reset the window");
+    }
+
+    // ---- expiry: inclusive at the stroke, and zero means no expiry ----------------------
+    #[test]
+    fn expiry_is_inclusive_at_the_stroke() {
+        let mut p = pol(); p.expires_at_ms = 1_000_000;
+        assert!(matches!(decide(true, &p, &req(1), 999_999), Decision::Allow { .. }),
+                "one ms before expiry the session still works");
+        assert!(matches!(decide(true, &p, &req(1), 1_000_000), Decision::Refuse(_)),
+                "AT the expiry stamp the session is over");
+    }
+
+    #[test]
+    fn zero_expiry_means_no_expiry() {
+        let p = pol();   // expires_at_ms == 0
+        assert!(matches!(decide(true, &p, &req(1), u64::MAX), Decision::Allow { .. }));
+    }
+
+    #[test]
+    fn an_expired_session_is_not_rescued_by_anything_else_passing() {
+        // Everything else about this request is impeccable; expiry alone must sink it.
+        let mut p = pol(); p.expires_at_ms = 1; p.spent_in_window = 0;
+        assert!(matches!(decide(true, &p, &req(1), 2), Decision::Refuse(Refusal::SessionExpired { .. })));
     }
 
     // ---- an empty allowlist denies everything -------------------------------------------
