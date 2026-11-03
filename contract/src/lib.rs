@@ -176,10 +176,15 @@ impl Leash {
 
                 let msg = solana::build_transfer_message(&from, &to, lamports.0 as u64, &bh);
 
+                // The wire format is NOT a guess: near-mpc-crypto-types/src/sign.rs:32 renames
+                // the field to `payload_v2` (plain `payload` is the LEGACY untagged 32-byte ECDSA
+                // field), and primitives.rs:100 tags Payload::Eddsa with #[serde(with =
+                // "hex_serde")] -- so the bytes are HEX, not base64. Both were read at source
+                // after a first attempt guessed base64 under `payload` and was rejected with
+                // "invalid type: map, expected an array of length 32".
                 let args = near_sdk::serde_json::json!({
                     "request": {
-                        "payload": { "Eddsa": near_sdk::base64::Engine::encode(
-                            &near_sdk::base64::engine::general_purpose::STANDARD, &msg) },
+                        "payload_v2": { "Eddsa": to_hex(&msg) },
                         "path": self.derivation_path,
                         "domain_id": DOMAIN_ED25519,
                     }
@@ -226,6 +231,25 @@ impl Leash {
         }
     }
 
+    // ---- diagnostic probes (temporary): locate where execution traps -----------------------
+    pub fn dbg_ok(&self) -> alloc::string::String {
+        env::log_str("dbg_ok: reached");
+        "ok".into()
+    }
+    pub fn dbg_panic_static(&self) {
+        env::log_str("dbg_panic_static: before panic");
+        env::panic_str("DBG_STATIC_MESSAGE");
+    }
+    pub fn dbg_panic_alloc(&self) {
+        env::log_str("dbg_panic_alloc: before panic");
+        let m: alloc::string::String = alloc::format!("DBG_ALLOC_{}", 42);
+        env::panic_str(&m);
+    }
+    pub fn dbg_require(&self) {
+        env::log_str("dbg_require: before require");
+        require!(false, "DBG_REQUIRE_MESSAGE");
+    }
+
     // ---- views -------------------------------------------------------------------------------
 
     pub fn get_solana_address(&self) -> alloc::string::String { self.solana_address.clone() }
@@ -243,6 +267,18 @@ impl Leash {
             allowed_recipients: p.allowed_recipients.clone(),
         })
     }
+}
+
+/// Lowercase hex, written here rather than pulled in as a dependency: it is six lines and the
+/// MPC contract's wire format depends on it being exactly right.
+fn to_hex(bytes: &[u8]) -> alloc::string::String {
+    const H: &[u8; 16] = b"0123456789abcdef";
+    let mut out = alloc::string::String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        out.push(H[(b >> 4) as usize] as char);
+        out.push(H[(b & 0x0f) as usize] as char);
+    }
+    out
 }
 
 /// Refusal messages are STABLE STRINGS, because the harness asserts on them. A guard whose

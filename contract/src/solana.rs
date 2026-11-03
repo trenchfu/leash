@@ -165,3 +165,18 @@ mod tests {
         assert_ne!(a, c, "recipient must affect the signed bytes");
     }
 }
+
+#[cfg(test)]
+mod hex_tests {
+    #[test]
+    fn hex_round_trips_against_a_known_vector() {
+        assert_eq!(crate::to_hex(&[0x00, 0x0f, 0xff, 0xa5]), "000fffa5");
+        assert_eq!(crate::to_hex(&[]), "");
+        // every byte value encodes to exactly two chars
+        let all: alloc::vec::Vec<u8> = (0u8..=255).collect();
+        let h = crate::to_hex(&all);
+        assert_eq!(h.len(), 512);
+        assert_eq!(&h[0..4], "0001");
+        assert_eq!(&h[508..512], "feff");
+    }
+}

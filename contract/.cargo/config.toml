@@ -1,0 +1,8 @@
+# near-sdk gates its HOST implementations behind a custom cfg flag literally named `near`:
+#   near-sdk-env-0.1.8/src/macros.rs:13  #[cfg(any(all(near, target_arch = "wasm32"), ...))]
+# Without it the `local` branch compiles in, and env::panic_str becomes eprintln! + panic!(),
+# which on wasm is an `unreachable` trap. The contract then loses EVERY panic message: refusals
+# surface as "WebAssembly trap" instead of the reason. `cargo near build` sets this; plain
+# `cargo build` does not, so we set it here to keep the repo reproducible either way.
+[build]
+rustflags = ["--cfg", "near"]
