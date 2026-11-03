@@ -27,7 +27,7 @@ use near_sdk::{
     env, near, require, AccountId, BorshStorageKey, Gas, NearToken, PanicOnDefault, Promise,
     PromiseError,
 };
-use policy::{decide, Decision, Policy, Refusal, Request};
+use policy::{decide, decide_novalue, Decision, Policy, Refusal, Request};
 
 /// Deposit `v1.signer.sign` requires: 1 yoctoNEAR
 /// (near-mpc-contract-interface/src/deposits.rs:4, read at source).
@@ -377,6 +377,99 @@ impl Leash {
                     ))
             }
         }
+    }
+
+    /// Leg 1 of the teletask action suite: accept a task. Built from PARAMETERS; this contract
+    /// emits the instruction itself, so the site cannot hand it bytes to sign.
+    #[payable]
+    pub fn request_accept_task(
+        &mut self,
+        task_escrow: alloc::string::String,
+        buyer: alloc::string::String,
+        config: alloc::string::String,
+        task_id: near_sdk::json_types::U64,
+        layer: u16,
+        recent_blockhash: alloc::string::String,
+    ) -> near_sdk::PromiseOrValue<Verdict> {
+        self.signed_novalue_leg("accept_task", task_escrow, buyer, Some(config), task_id,
+                                layer, None, recent_blockhash)
+    }
+
+    /// Leg 3: submit evidence plus the TTEV1 memo in one transaction.
+    ///
+    /// `ev` is the compact evidence JSON. THE CONTRACT HASHES IT ITSELF and puts the same bytes in
+    /// the memo, so the check-bot's hash comparison cannot fail through a mismatch between what was
+    /// hashed and what was published. Accepting a caller-supplied hash would reintroduce exactly
+    /// the gap this design exists to close.
+    #[payable]
+    pub fn request_submit_evidence(
+        &mut self,
+        task_escrow: alloc::string::String,
+        buyer: alloc::string::String,
+        task_id: near_sdk::json_types::U64,
+        ev: alloc::string::String,
+        recent_blockhash: alloc::string::String,
+    ) -> near_sdk::PromiseOrValue<Verdict> {
+        self.signed_novalue_leg("submit_evidence", task_escrow, buyer, None, task_id, 0,
+                                Some(ev), recent_blockhash)
+    }
+
+    fn signed_novalue_leg(
+        &mut self,
+        leg: &str,
+        task_escrow: alloc::string::String,
+        buyer: alloc::string::String,
+        config: Option<alloc::string::String>,
+        task_id: near_sdk::json_types::U64,
+        layer: u16,
+        ev: Option<alloc::string::String>,
+        recent_blockhash: alloc::string::String,
+    ) -> near_sdk::PromiseOrValue<Verdict> {
+        let caller = env::predecessor_account_id();
+        let known = self.agents.contains_key(&caller);
+        let pol = self.agents.get(&caller).cloned().unwrap_or(Policy {
+            enabled: false, per_tx_lamports: 0, window_lamports: 0, spent_in_window: 0,
+            window_started_ms: 0, allowed_recipients: alloc::vec::Vec::new(), expires_at_ms: 0,
+        });
+        if let Decision::Refuse(r) = decide_novalue(known, &pol, env::block_timestamp_ms()) {
+            let reason = refusal_message(&r);
+            self.write_record(&caller, &alloc::string::String::new(), 0, false, reason.clone());
+            env::log_str(&reason);
+            return near_sdk::PromiseOrValue::Value(Verdict { allowed: false, reason });
+        }
+
+        let bad = |w: &str| -> ! { env::panic_str(w) };
+        let from = solana::decode_pubkey(&self.solana_address).unwrap_or_else(|| bad("bad solana_address"));
+        let esc = solana::decode_pubkey(&task_escrow).unwrap_or_else(|| bad("bad task_escrow"));
+        let buy = solana::decode_pubkey(&buyer).unwrap_or_else(|| bad("bad buyer"));
+        let bh = solana::decode_pubkey(&recent_blockhash).unwrap_or_else(|| bad("bad recent_blockhash"));
+
+        let msg = if leg == "accept_task" {
+            let cfg = solana::decode_pubkey(&config.unwrap()).unwrap_or_else(|| bad("bad config"));
+            solana::build_accept_task_message(&from, &esc, &buy, &cfg, task_id.0, layer, &bh)
+        } else {
+            let e = ev.unwrap();
+            let h = env::sha256(e.as_bytes());
+            let mut hash = [0u8; 32];
+            hash.copy_from_slice(&h);
+            solana::build_submit_evidence_message(&from, &esc, &buy, task_id.0, &e, &hash, &bh)
+        }
+        .unwrap_or_else(|| bad("message build failed"));
+
+        self.write_record(&caller, &task_escrow, 0, true,
+                          alloc::format!("{} signature requested (no lamports)", leg));
+
+        let args = near_sdk::serde_json::json!({
+            "request": {
+                "payload_v2": { "Eddsa": to_hex(&msg) },
+                "path": self.derivation_path,
+                "domain_id": DOMAIN_ED25519,
+            }
+        }).to_string().into_bytes();
+
+        near_sdk::PromiseOrValue::Promise(
+            Promise::new(self.mpc_contract.clone())
+                .function_call("sign".to_string(), args, SIGN_DEPOSIT, SIGN_GAS))
     }
 
     /// Refund the optimistic spend when signing failed, so a failed signature does not silently

@@ -128,6 +128,29 @@ pub fn decide(known: bool, p: &Policy, r: &Request, now_ms: u64) -> Decision {
     Decision::Allow { new_spent_in_window: projected, new_window_started_ms: started }
 }
 
+/// Gate for calls that move NO lamports (the escrow legs). It deliberately does NOT consult the
+/// amount, allowlist or window, because there is no amount to bound: the builder emits no System
+/// Program account, so a transfer is not expressible in those messages. Checking a spend limit
+/// here would be theatre -- a guard that reads as protection while guarding nothing.
+///
+/// What still applies is WHO and WHEN: an unknown, disabled or expired agent must not be able to
+/// act as the provider.
+pub fn decide_novalue(known: bool, p: &Policy, now_ms: u64) -> Decision {
+    if !known {
+        return Decision::Refuse(Refusal::UnknownAgent);
+    }
+    if !p.enabled {
+        return Decision::Refuse(Refusal::AgentDisabled);
+    }
+    if p.expires_at_ms != 0 && now_ms >= p.expires_at_ms {
+        return Decision::Refuse(Refusal::SessionExpired {
+            expired_at_ms: p.expires_at_ms,
+            now_ms,
+        });
+    }
+    Decision::Allow { new_spent_in_window: p.spent_in_window, new_window_started_ms: p.window_started_ms }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -273,6 +296,33 @@ mod tests {
         // Everything else about this request is impeccable; expiry alone must sink it.
         let mut p = pol(); p.expires_at_ms = 1; p.spent_in_window = 0;
         assert!(matches!(decide(true, &p, &req(1), 2), Decision::Refuse(Refusal::SessionExpired { .. })));
+    }
+
+    // ---- the no-value gate: WHO and WHEN only ------------------------------------------
+    #[test]
+    fn novalue_gate_allows_a_live_agent_regardless_of_amount_state() {
+        let mut p = pol();
+        p.spent_in_window = p.window_lamports;   // fully spent: irrelevant, nothing moves
+        p.allowed_recipients.clear();            // empty allowlist: irrelevant, no recipient
+        assert!(matches!(decide_novalue(true, &p, 1_000_000), Decision::Allow { .. }));
+    }
+
+    #[test]
+    fn novalue_gate_still_refuses_who_and_when() {
+        assert_eq!(refusal_of(decide_novalue(false, &pol(), 1_000_000)), Refusal::UnknownAgent);
+        let mut d = pol(); d.enabled = false;
+        assert_eq!(refusal_of(decide_novalue(true, &d, 1_000_000)), Refusal::AgentDisabled);
+        let mut e = pol(); e.expires_at_ms = 900_000;
+        assert!(matches!(refusal_of(decide_novalue(true, &e, 1_000_000)), Refusal::SessionExpired { .. }));
+    }
+
+    #[test]
+    fn novalue_gate_does_not_consume_budget() {
+        let mut p = pol(); p.spent_in_window = 123;
+        match decide_novalue(true, &p, 1_000_000) {
+            Decision::Allow { new_spent_in_window, .. } => assert_eq!(new_spent_in_window, 123),
+            other => panic!("expected Allow, got {:?}", other),
+        }
     }
 
     // ---- an empty allowlist denies everything -------------------------------------------
