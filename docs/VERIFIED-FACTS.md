@@ -70,6 +70,35 @@ The threshold held; **the denominator moved**. Whether the set shrank or the blo
 participant, the lesson is the same and it is the one written into this project: **a consumer that
 caches the committee is wrong within eleven days.** Leash reads `state` rather than storing a copy.
 
+## Defence in depth: a function-call key in front of the policy (2026-11-03)
+
+Added on the blind review's prompt. Two independent constraints now sit in series:
+
+- **NEAR access key** limits *what the agent may call*: receiver `leash-b0c503d6.testnet`,
+  `method_names: ["request_transfer"]`, allowance 0.25 NEAR.
+- **Leash's policy** limits *what that call may do*: allowlist, per-tx ceiling, rolling window,
+  session expiry.
+
+Verified two-sided, with the SIGNING KEY asserted on both arms (`ed25519:Df2uGKfn…`):
+
+| arm | method | result |
+|---|---|---|
+| 1 | `request_transfer` (permitted) | accepted, reached the contract |
+| 2 | `reset_agent_window` (not permitted) | **rejected**: *"Transaction method name &lt;reset_agent_window&gt; isn't allowed by the access key."* |
+
+**The first version of this test was invalid and I caught it.** The agent's credentials exist in
+TWO places — an account-level file and a per-key directory still holding the full-access key — and
+`near-cli-rs` signed with the full-access key, so the "restricted" arm sailed through and was only
+stopped by the contract's own `owner only` check. A passing two-sided test that silently used the
+wrong key proves nothing. The test only became evidence once the per-key directory was parked aside
+and the printed signing key was **asserted to be the FC key** on both arms.
+
+**Scope limit, stated:** that rejection came from `near-cli-rs`
+(`transaction_signature_options/send/mod.rs:181`) — a **client-side** pre-check. NEAR's protocol
+also enforces access-key restrictions, but that is a **receipt from the protocol spec, not a thing
+I measured**. Proving the *chain* rejects it needs a transaction submitted straight to the RPC,
+bypassing the client check. NOT DONE.
+
 ## NOT established (stated, not hidden)
 
 - **Whether a full-access key on the policy-contract account defeats the whole guarantee.** It should: a full-access key can redeploy the contract or act as that account directly, and the derived key follows the ACCOUNT, not the code. So the custody property requires a **locked account** (zero full-access keys). This is a design requirement and a thing the harness must PROVE, not assert. NEAR's docs do not address it.
