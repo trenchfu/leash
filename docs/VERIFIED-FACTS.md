@@ -99,8 +99,42 @@ also enforces access-key restrictions, but that is a **receipt from the protocol
 I measured**. Proving the *chain* rejects it needs a transaction submitted straight to the RPC,
 bypassing the client check. NOT DONE.
 
+## The locked-account property: ATTACKED, then CLOSED (2026-11-03)
+
+This was the hole I documented against my own design from the first commit: a Chain-Signatures key
+follows the **account**, not the code, so a full-access key can replace the policy and keep the same
+Solana address. `harness/prove_locked_account.py` now runs it. **15 of 15.**
+
+The attack is demonstrated FIRST, deliberately. Showing only that a locked account refuses a
+redeploy proves that something I never showed was dangerous is now prevented.
+
+| arm | account | result |
+|---|---|---|
+| A | `leash-attack-e57147` | address derives before any code exists: `DQEm5LjT…PMWE` |
+| B | same | Leash deployed; **address unchanged** — the key is account-bound, not code-bound |
+| C | same, **unlocked** | **the rogue REPLACED Leash**, kept the identical address, `policy_count=0`, and reports it *"would sign 999999999 lamports to anywhere with NO policy check"* |
+| D | `leash-locked-7f0c6d` (fresh) | Leash deployed, then **1 → 0 full-access keys** on chain |
+| E | same, **locked** | redeploy **refused by the CHAIN**: *"Access key for public key ed25519:EmcE2p… does not exist"*; the rogue did not land; Leash is still the deployed code |
+
+Arm E's rejection is **chain-level**, not a client pre-check — which is the distinction left open by
+the function-call-key test above, and it is closed here.
+
+### Two mistakes inside this proof, both caught by the harness
+
+1. **I ran both halves on one account and it silently broke.** The rogue's `seize()` writes state,
+   Leash's `new()` is `#[init]` and refuses existing state, so the "restore Leash" step failed
+   without stopping the run — and the account was then **locked with the ROGUE on it, permanently**.
+   The harness's own assertion caught it. The fix is structural, not a retry: **one account per
+   claim**. An account that has been attacked cannot also demonstrate the defence.
+   (`leash-lock-2dcad8.testnet` is now a locked rogue and is kept, not deleted, as the evidence.)
+2. **My summary line asserted a conclusion the data had not produced.** It printed "the attack is
+   real on an unlocked account and refused on a locked one" regardless of the arms. A printed
+   conclusion that does not depend on its inputs is the same defect class as a verifier that cannot
+   fail. It now derives both halves from the recorded arms and prints `INCOMPLETE -- do not quote
+   this as a proof` when either is missing.
+
 ## NOT established (stated, not hidden)
 
-- **Whether a full-access key on the policy-contract account defeats the whole guarantee.** It should: a full-access key can redeploy the contract or act as that account directly, and the derived key follows the ACCOUNT, not the code. So the custody property requires a **locked account** (zero full-access keys). This is a design requirement and a thing the harness must PROVE, not assert. NEAR's docs do not address it.
+- ~~Whether a full-access key defeats the guarantee.~~ **CLOSED** — proven both ways above, 15/15.
 - Whether 11-of-16 is *safe*. That is a measured parameter, not a risk verdict. No operator-independence or jurisdictional analysis was done.
 - End-to-end Ed25519 signing has **not yet been executed** by this project. Until it is, #3 means "the domain is live", not "we produced a Solana signature".
