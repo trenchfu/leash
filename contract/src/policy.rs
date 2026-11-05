@@ -15,6 +15,48 @@ use alloc::string::String;
 /// Milliseconds in the rolling spend window.
 pub const WINDOW_MS: u64 = 24 * 60 * 60 * 1000;
 
+/// Has the rolling window elapsed?
+///
+/// ONE expression, three call sites: `decide()`, `decide_spl()`, and the `get_agent_policy` view's
+/// `spent_in_window_effective`. It was written out three separate times first, which is a rule
+/// free to diverge — and the view is the call site where a divergence would be invisible, because
+/// it would simply display a number that enforcement disagreed with. A view that can disagree with
+/// the thing it describes is worse than a missing view.
+///
+/// `saturating_sub` means a `now_ms` BEFORE `window_started_ms` (a clock that went backwards)
+/// yields 0 and reads NOT expired, which fails toward keeping the existing window rather than
+/// silently granting a fresh allowance.
+pub fn window_expired(now_ms: u64, window_started_ms: u64) -> bool {
+    now_ms.saturating_sub(window_started_ms) >= WINDOW_MS
+}
+
+/// The spend to store after a FAILED-signature refund, or `None` meaning DO NOT refund.
+///
+/// Why this is a decision and not a subtraction. The spend is charged optimistically at sign
+/// time, before the cross-contract call yields, and the failure callback reverses it. But the
+/// callback carries only an AMOUNT. If the rolling window has rolled between the charge and the
+/// callback, subtracting that amount credits a window that never paid it: the stale refund
+/// lands on whatever window is current, and several of them stacked across a boundary can drive
+/// a live window's recorded spend to zero while its real in-flight spend is high. Saturating
+/// arithmetic floors each subtraction at zero but does nothing about the SUM, so the error is
+/// bounded by the current window's own spend, not by one per-tx amount.
+///
+/// Matching the charged window is what makes the refund correct across a roll: the window the
+/// charge belonged to is either still current (credit it) or gone (there is nothing to credit,
+/// and its totals no longer gate anything). Window ids are `block_timestamp_ms` at roll and are
+/// monotonic, so equality identifies the window uniquely.
+pub fn refund_spend(
+    current_spent: u128,
+    current_window_started_ms: u64,
+    charged_window_started_ms: u64,
+    amount: u128,
+) -> Option<u128> {
+    if current_window_started_ms != charged_window_started_ms {
+        return None;
+    }
+    Some(current_spent.saturating_sub(amount))
+}
+
 // Borsh lives on the DATA, not on the decision: `decide()` below stays a pure function of
 // its arguments. Deriving serialization here costs nothing in testability and avoids a
 // parallel StoredPolicy type that could silently drift from this one.
@@ -113,7 +155,7 @@ pub fn decide(known: bool, p: &Policy, r: &Request, now_ms: u64) -> Decision {
     // Roll the window forward if the old one has expired. Saturating arithmetic throughout: a
     // clock that goes backwards must never silence the limit (it would underflow to a huge
     // "remaining" budget), which is the failure mode an alarm clock usually has.
-    let expired = now_ms.saturating_sub(p.window_started_ms) >= WINDOW_MS;
+    let expired = window_expired(now_ms, p.window_started_ms);
     let (spent, started) = if expired { (0u128, now_ms) } else { (p.spent_in_window, p.window_started_ms) };
 
     let projected = spent.saturating_add(r.lamports);
@@ -337,5 +379,94 @@ mod tests {
     fn huge_request_cannot_wrap_the_window_total() {
         let mut p = pol(); p.spent_in_window = u128::MAX - 1; p.per_tx_lamports = u128::MAX;
         assert!(matches!(decide(true, &p, &req(u128::MAX), 1_000_000), Decision::Refuse(_)));
+    }
+}
+
+#[cfg(test)]
+mod window_expiry_tests {
+    use super::*;
+
+    /// The boundary is INCLUSIVE: at exactly WINDOW_MS the window has elapsed. The view and both
+    /// decide() arms share this, so the boundary is asserted once rather than per call site.
+    #[test]
+    fn window_expiry_boundary_is_inclusive() {
+        let start = 1_000_000u64;
+        assert!(!window_expired(start, start), "zero elapsed is not expired");
+        assert!(!window_expired(start + WINDOW_MS - 1, start), "one ms short");
+        assert!(window_expired(start + WINDOW_MS, start), "exactly at the window");
+        assert!(window_expired(start + WINDOW_MS * 9, start), "long past");
+    }
+
+    /// A clock that went backwards must not mint a fresh allowance.
+    #[test]
+    fn backwards_clock_reads_not_expired() {
+        assert!(!window_expired(1, 1_000_000), "now before start must hold the window");
+        assert!(!window_expired(0, u64::MAX));
+    }
+
+    // ---- refund window-identity: the WL-CL-012 defect and its guard ----------------------
+    // Two-sided by construction: the first test fails if the guard refuses a refund it should
+    // allow, the rest fail if it allows one it should refuse.
+
+    #[test]
+    fn positive_control_same_window_refunds() {
+        // The guard must not break the ordinary path: a failure in the window that was charged
+        // gives the budget back. If this fails the fix is worse than the defect.
+        assert_eq!(refund_spend(1_000, 7_000, 7_000, 400), Some(600));
+    }
+
+    #[test]
+    fn a_rolled_window_is_not_credited() {
+        // THE DEFECT. Charge booked in window 7_000, callback lands after a roll to 9_000.
+        // Subtracting here would credit a window that never paid the charge.
+        assert_eq!(refund_spend(1_000, 9_000, 7_000, 400), None);
+    }
+
+    #[test]
+    fn stacked_stale_refunds_cannot_zero_a_live_window() {
+        // The amplification that made my first bound ("one per-tx") wrong: several charges from
+        // the OLD window failing after the roll. This models the call site -- it APPLIES whatever
+        // the decision returns, so the assertion is about the resulting budget and not merely
+        // about the return value.
+        let mut spent = 3_000u128;
+        for amount in [1_000u128, 1_000, 1_000, 1_000] {
+            if let Some(next) = refund_spend(spent, 9_000, 7_000, amount) {
+                spent = next;
+            }
+        }
+        assert_eq!(spent, 3_000, "stale refunds must not move a live window's spend");
+
+        // CONTRAST ARM, so the assertion above cannot pass vacuously: the identical loop with a
+        // MATCHING window id does drain the budget. If this arm failed, the loop above would be
+        // proving nothing more than that the loop body never runs.
+        let mut same = 3_000u128;
+        for amount in [1_000u128, 1_000, 1_000, 1_000] {
+            if let Some(next) = refund_spend(same, 7_000, 7_000, amount) {
+                same = next;
+            }
+        }
+        assert_eq!(same, 0, "the same loop with a matching window must drain it");
+    }
+
+    #[test]
+    fn refund_saturates_and_never_underflows_in_its_own_window() {
+        // Same window, amount larger than the recorded spend: floor at zero, never wrap.
+        assert_eq!(refund_spend(100, 7_000, 7_000, 400), Some(0));
+        assert_eq!(refund_spend(0, 7_000, 7_000, u128::MAX), Some(0));
+    }
+
+    #[test]
+    fn an_earlier_window_id_is_also_refused() {
+        // Not only "rolled forward". Any mismatch is refused, including a charged id that is
+        // LATER than current, which a clock that went backwards could produce.
+        assert_eq!(refund_spend(1_000, 7_000, 9_000, 400), None);
+    }
+
+    #[test]
+    fn zero_window_ids_still_compare_exactly() {
+        // A freshly initialised agent has window_started_ms = 0; that must behave like any other
+        // id rather than matching everything.
+        assert_eq!(refund_spend(500, 0, 0, 100), Some(400));
+        assert_eq!(refund_spend(500, 0, 1, 100), None);
     }
 }
