@@ -18,20 +18,27 @@ import solana_lib as S
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 rd = lambda n: open(os.path.join(ROOT, n)).read().strip()
-CONTRACT, OWNER, AGENT = rd(".contract-account"), rd(".owner-account"), rd(".agent-account")
-LEASH = rd(".solana-address")
+# Which Leash to drive. Defaults to the dev contract; the locked snapshot is selected by env so
+# the same runner proves both without a second copy that could drift from this one.
+CONTRACT = os.environ.get("LEASH_CONTRACT") or rd(".contract-account")
+LEASH = os.environ.get("LEASH_ADDRESS") or rd(".solana-address")
+OWNER, AGENT = rd(".owner-account"), rd(".agent-account")
 NEAR = os.path.expanduser("~/.local/bin/near")
 DEVNET = "https://api.devnet.solana.com"
 NEAR_RPCS = ["https://test.rpc.fastnear.com", "https://rpc.testnet.near.org"]
 CONFIG = "5kZkCquZpfAfXo6QAMDbne6xg3y2QiVEGtrrFXtvhV9i"
 BUYER = "DEvzHWdnsZmNCUwaZ3wcy4AWuLBNf18uUnRCwNawadEP"
-TASKS = [
+TASKS = json.loads(os.environ["LEASH_TASKS"]) if os.environ.get("LEASH_TASKS") else [
     ("3fJ3B6tStGs3wnsbvvJXjRR5qcoyY4dPAj1sPKkvon47", 1793731600466,
      "6rgrQQA1v2XV16wLyshyzWTBfJ48L7MreieajorszBNP"),
     ("76wJNKq9dfS24Xh2Re9RCqoGCJxQcHFVXnS6PL4qPYzZ", 1793731600467,
      "6gwA3HDRACnmA7jG3DTaMjHtHs9RqEZk2C1oZgLsBtg7"),
 ]
-LAMPORTS = 10_000_000  # 0.01 SOL
+LAMPORTS = int(os.environ.get("LEASH_LAMPORTS", 10_000_000))
+# The policy is set by the owner out of band for the locked account; re-setting it here would
+# rewrite the very thing under test.
+SET_POLICY = os.environ.get("LEASH_SET_POLICY", "1") == "1"
+SKIP_ACCEPT = os.environ.get("LEASH_SKIP_ACCEPT", "0") == "1"
 
 
 def rpc(url, method, params, tries=3):
@@ -59,7 +66,12 @@ def near_rpc(method, params):
 
 
 def blockhash():
-    return rpc(DEVNET, "getLatestBlockhash", [{"commitment": "finalized"}])["result"]["value"]["blockhash"]
+    # 11-05 (Cleo): was "finalized", which hands back a hash already ~32 slots behind the tip and so
+    # burns a fifth of the 150-slot validity window BEFORE the MPC round-trip (a NEAR call plus up to
+    # 8x2s of signature polling) even starts. Task 2 of the action-leash-sol run lost that race with
+    # BlockhashNotFound while task 1 won it -- one-sided luck, not method. "confirmed" is as near the
+    # tip as is safe to sign over, which is what the signing delay actually needs.
+    return rpc(DEVNET, "getLatestBlockhash", [{"commitment": "confirmed"}])["result"]["value"]["blockhash"]
 
 
 def call(signer, method, args, deposit="1 yoctoNEAR", gas="300.0 Tgas"):
@@ -132,17 +144,27 @@ def leg(name, method, args, build_msg):
 
 def run_task(idx, escrow, task_id, fixture):
     print(f"\n=== TASK {idx}/2  escrow {escrow[:12]}...  fixture {fixture[:12]}...")
+    if not SET_POLICY:
+        print("    policy: left as configured (not rewritten by the runner)")
+        return run_legs(escrow, task_id, fixture)
     future = int((time.time() + 7 * 86400) * 1000)
     call(OWNER, "set_agent_policy",
          {"agent": AGENT, "per_tx_lamports": str(LAMPORTS), "window_lamports": str(LAMPORTS * 4),
           "allowed_recipients": [fixture], "expires_at_ms": str(future)}, deposit="0 NEAR")
     call(OWNER, "reset_agent_window", {"agent": AGENT}, deposit="0 NEAR")
     print(f"    policy: per-tx {LAMPORTS}, payee {fixture[:12]}..., expires in 7d")
+    return run_legs(escrow, task_id, fixture)
 
+
+def run_legs(escrow, task_id, fixture):
     prov, esc, buy, cfg, fix = (S.b58decode(x) for x in (LEASH, escrow, BUYER, CONFIG, fixture))
 
     bh = blockhash()
-    if not leg("1 accept_task", "request_accept_task",
+    # 11-05 (Cleo): an accept leg that already landed must not be re-sent -- the program refuses the
+    # second accept and the task would abort before the transfer it still owes.
+    if SKIP_ACCEPT:
+        print("    [1 accept_task] SKIPPED (already landed; LEASH_SKIP_ACCEPT=1)")
+    elif not leg("1 accept_task", "request_accept_task",
                {"task_escrow": escrow, "buyer": BUYER, "config": CONFIG,
                 "task_id": str(task_id), "layer": 0, "recent_blockhash": bh},
                lambda: S.build_accept_task_message(prov, esc, buy, cfg, task_id, 0, S.b58decode(bh))):

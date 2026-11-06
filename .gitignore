@@ -4,3 +4,5 @@ _vendor-readonly/
 *.wasm
 .env
 neardev/
+__pycache__/
+*.pyc

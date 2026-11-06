@@ -84,3 +84,26 @@ def build_submit_evidence_message(provider, task_escrow, buyer, task_id, ev, ev_
     memo = b"TTEV1|" + ev.encode()
     return _message(keys, 1, 0, 3, blockhash,
                     [(3, [2, 1, 0], submit), (4, [], memo)])
+
+
+def build_transfer_checked_message(authority: bytes, source: bytes, destination: bytes,
+                                   mint: bytes, token_program: bytes,
+                                   amount: int, decimals: int, blockhash: bytes) -> bytes:
+    """SPL/Token-2022 TransferChecked, built INDEPENDENTLY of the Rust contract.
+
+    Written from the wire format, not transliterated from solana.rs, on purpose: the harness then
+    verifies the contract's signature against THIS message, so a disagreement between the two
+    implementations shows up as a signature that does not verify instead of as a transfer that
+    lands against the wrong accounts.
+
+    Key table (fee payer first, as the format requires):
+      0 authority writable signer, 1 source writable, 2 destination writable,
+      3 mint readonly, 4 token_program readonly
+    TransferChecked's own account order is (source, mint, destination, authority) -- NOT the key
+    order -- so the instruction indices are [1, 3, 2, 0].
+    """
+    keys = [authority, source, destination, mint, token_program]
+    assert len(set(keys)) == len(keys), "duplicate keys merge on chain and union their privileges"
+    data = bytes([12]) + amount.to_bytes(8, "little") + bytes([decimals])
+    return _message(keys, 1, 0, 2, blockhash,
+                    [(4, [1, 3, 2, 0], data)])

@@ -16,11 +16,15 @@ ROOT = os.path.dirname(HERE)
 rd = lambda n: open(os.path.join(ROOT, n)).read().strip()
 
 CONTRACT, AGENT = rd(".contract-account"), rd(".agent-account")
-LEASH_ADDR, RECIPIENT = rd(".solana-address"), rd(".allowed-recipient")
+LEASH_ADDR = rd(".solana-address")
+# overridable so this harness can land a transfer to any ALLOWLISTED recipient, not just the
+# fixture. The policy still decides: an address the owner has not allowlisted is refused on chain,
+# so widening the harness widens no authority.
+RECIPIENT = os.environ.get("LEASH_RECIPIENT") or rd(".allowed-recipient")
 NEAR = os.path.expanduser("~/.local/bin/near")
 DEVNET = "https://api.devnet.solana.com"
 NEAR_RPC = "https://rpc.testnet.near.org"
-LAMPORTS = 1_000_000
+LAMPORTS = int(os.environ.get("LEASH_LAMPORTS", "1000000"))
 
 
 def rpc(url, method, params):
