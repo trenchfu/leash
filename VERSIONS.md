@@ -23,21 +23,38 @@ RPC's own `code_hash` field (the two agree).
 | `leash-b0c503d6.testnet` | main contract | 459,050 | `FksLFKoeD6Xco1D9omAQ2hrhczMwNjVnt27T2u89kkbt` | `db40808d5b6ad22f` |
 | `leash-locked-7f0c6d.testnet` | locked snapshot (access-key-less) | 305,580 | `4iHvhQNszRYgJsU27o37okn5nZ1n9icYJ68RjaksfLYq` | `372703139fccf4e6` |
 
-### Reproducibility status — READ THIS BEFORE CITING A BUILD
+### Reproducibility status — VERIFIED
 
-**The deployed artifact is not yet byte-reproducible from this tree.** Rebuilding the deployed
-source with the pinned dependency tree and `--cfg near` yields **459,042 bytes**, against the
-deployed **459,050**. The 8-byte gap is unexplained and is *not* attributed to any source change.
-What *is* measured: applying the WL-CL-020 patch to that same tree changes the output by exactly
-**29 bytes**, and host-import sets are identical (37 imports, none only-deployed, none only-local).
+**The deployed artifact rebuilds byte-for-byte from this tree.** Proven with a clean build into an
+empty target directory (46.8 s, no cache):
 
-Consequences, stated rather than buried:
+```
+rebuilt   459,050 bytes  sha256 db40808d5b6ad22f733f2ff674d91913af1eb21a2e81a5f41e4012816922b30b
+deployed  459,050 bytes  sha256 db40808d5b6ad22f733f2ff674d91913af1eb21a2e81a5f41e4012816922b30b
+IDENTICAL
+```
 
-- A claim of the form "this source produced that on-chain artifact" is **UNVERIFIED** at byte level.
-- A claim of the form "this patch costs 29 bytes against its own baseline" **is** verified, because
-  both sides of that comparison were built here under identical flags.
-- `--cfg near` is load-bearing, not cosmetic: without it the build substitutes a software sha256 for
-  the host function, which moves gas. A rebuild that omits it is a different contract.
+Reproduce it yourself with `./verify.sh` at the repo root — it rebuilds, fetches the deployed code
+from `rpc.testnet.near.org`, and derives the hash **from the returned bytes** rather than trusting
+the RPC's own `code_hash` field.
+
+**CORRECTION, 2026-11-06.** An earlier revision of this file stated the opposite — that a rebuild
+gave 459,042 against 459,050, an 8-byte gap. That was wrong. The 459,042 figure came from rebuilding
+a separate *evidence package* tree, not this repository, at a time when this repository was wrongly
+believed not to exist. The gap measured a difference between that package and this repo; it was
+never a property of this source. Recorded here rather than quietly deleted, because anyone who read
+the earlier claim deserves to find its retraction in the same place.
+
+### Dependency pinning
+
+`near-sdk` is pinned **exactly** (`=5.30.0`), not by caret. The pin was landed with a two-sided
+control, because a pin that constrains nothing is decoration:
+
+- **It binds:** under the pin, `cargo update -p near-sdk` locks 0 packages.
+- **The drift it prevents is real:** under the previous caret `^5.6.0`, `cargo update` moves 12
+  packages, `near-sdk` among them (5.30.0 → 5.30.1).
+- **It is byte-neutral:** a clean rebuild under the pin produces the same 459,050 bytes and the same
+  sha256, and `Cargo.lock` is unchanged. The pin removes a future hazard without moving the artifact.
 
 ### Why the declared dependency is not the shipped one
 

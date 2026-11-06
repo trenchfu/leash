@@ -10,7 +10,8 @@ A reviewer should be able to reach a verdict from the first two tiers alone.
 ## Tier 1 — runs offline, no keys, no network
 
 ```bash
-cd contract && cargo test
+./verify.sh          # all three tiers below, one command
+cd contract && cargo test   # or just the offline suite
 ```
 
 **72 tests, 0 failed.** This is the whole policy core and the Solana message builder. It needs no
@@ -85,9 +86,7 @@ claim otherwise.
 Read [`VERIFIED-FACTS.md`](VERIFIED-FACTS.md) for the full list, and [`../VERSIONS.md`](../VERSIONS.md)
 for the build record. The two limits worth stating here:
 
-1. **The deployed artifact is not byte-reproducible from this tree.** A rebuild under the pinned
-   dependencies and `--cfg near` gives 459,042 bytes against the deployed 459,050. Eight bytes,
-   unexplained, and not attributable to any source change. Do not cite this repo as a reproducible
-   build of `FksLFKoe`.
+1. **Signature provenance beyond the committee.** The build *is* byte-reproducible (`./verify.sh`
+   proves it), but reproducibility of the code says nothing about who holds the signing shares.
 2. **Trust moves, it does not vanish.** Signatures come from an MPC committee. Leash removes
    unilateral agent control over a key; it does not remove the committee.
