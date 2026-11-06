@@ -4,6 +4,14 @@ This mirrors contract/src/solana.rs INDEPENDENTLY, in a different language. That
 deliberate: if the Rust and this disagree, the signature will not verify and the transfer will not
 land. Two implementations agreeing is evidence; one implementation agreeing with itself is not.
 """
+import sys
+if sys.version_info[:2] < (3, 8):
+    sys.stderr.write(
+        "WRONG INTERPRETER: the Leash harness requires python >= 3.8, got %d.%d.%d at %s.\n"
+        "NOTHING RAN. Invoke an explicit interpreter, e.g. `python3.10 %s`.\n"
+        % (sys.version_info[0], sys.version_info[1], sys.version_info[2],
+           sys.executable, sys.argv[0]))
+    sys.exit(3)
 B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 
 

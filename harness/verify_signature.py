@@ -1,4 +1,4 @@
-#!/usr/bin/env python3.10
+#!/usr/bin/env python3
 """Verify that the signature Leash obtained is a VALID Ed25519 signature by Leash's own
 derived Solana address, over the exact message the contract constructed.
 
@@ -7,6 +7,14 @@ come back whether or not they mean anything. The signature must verify against t
 that was derived for (contract account, path) -- and it must FAIL against a tampered message,
 or the verification itself is vacuous.
 """
+import sys
+if sys.version_info[:2] < (3, 8):
+    sys.stderr.write(
+        "WRONG INTERPRETER: the Leash harness requires python >= 3.8, got %d.%d.%d at %s.\n"
+        "NOTHING RAN. Invoke an explicit interpreter, e.g. `python3.10 %s`.\n"
+        % (sys.version_info[0], sys.version_info[1], sys.version_info[2],
+           sys.executable, sys.argv[0]))
+    sys.exit(3)
 import sys
 from nacl.signing import VerifyKey
 from nacl.exceptions import BadSignatureError

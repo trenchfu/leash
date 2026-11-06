@@ -1,4 +1,4 @@
-#!/usr/bin/env python3.10
+#!/usr/bin/env python3
 """Prove the jail: every refusal Leash claims must be REACHABLE against the LIVE contract.
 
 A verifier that cannot fail is not a verifier. Unit tests prove the pure decision function
@@ -9,6 +9,14 @@ exact refusal string each arm must produce.
 It also runs a POSITIVE CONTROL: a compliant request that must NOT be refused. Without it, a
 contract that refused absolutely everything would score a perfect 7/7 and look like a triumph.
 """
+import sys
+if sys.version_info[:2] < (3, 8):
+    sys.stderr.write(
+        "WRONG INTERPRETER: the Leash harness requires python >= 3.8, got %d.%d.%d at %s.\n"
+        "NOTHING RAN. Invoke an explicit interpreter, e.g. `python3.10 %s`.\n"
+        % (sys.version_info[0], sys.version_info[1], sys.version_info[2],
+           sys.executable, sys.argv[0]))
+    sys.exit(3)
 import json, os, re, subprocess, sys, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))

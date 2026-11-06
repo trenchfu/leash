@@ -13,6 +13,14 @@ Two deliberate choices about how this is checked:
     writer, and that assumption has already cost me one wrong finding that got cited upstream.
     preTokenBalances/postTokenBalances are per-transaction facts and survive concurrency.
 """
+import sys
+if sys.version_info[:2] < (3, 8):
+    sys.stderr.write(
+        "WRONG INTERPRETER: the Leash harness requires python >= 3.8, got %d.%d.%d at %s.\n"
+        "NOTHING RAN. Invoke an explicit interpreter, e.g. `python3.10 %s`.\n"
+        % (sys.version_info[0], sys.version_info[1], sys.version_info[2],
+           sys.executable, sys.argv[0]))
+    sys.exit(3)
 import base64, json, os, re, subprocess, sys, time, urllib.request
 
 from nacl.exceptions import BadSignatureError

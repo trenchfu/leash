@@ -1,4 +1,4 @@
-#!/usr/bin/env python3.10
+#!/usr/bin/env python3
 """End to end: an agent asks Leash for a transfer, Leash checks policy, the NEAR MPC signs, and
 the transaction LANDS on Solana devnet.
 
@@ -6,6 +6,14 @@ Everything before this proved a signature was valid. Valid is not landed: a sign
 blockhash, a malformed wire envelope, or an underfunded account all produce a perfectly valid
 signature that moves nothing. This script closes that gap and measures the balances on both sides.
 """
+import sys
+if sys.version_info[:2] < (3, 8):
+    sys.stderr.write(
+        "WRONG INTERPRETER: the Leash harness requires python >= 3.8, got %d.%d.%d at %s.\n"
+        "NOTHING RAN. Invoke an explicit interpreter, e.g. `python3.10 %s`.\n"
+        % (sys.version_info[0], sys.version_info[1], sys.version_info[2],
+           sys.executable, sys.argv[0]))
+    sys.exit(3)
 import base64, json, os, re, subprocess, sys, time, urllib.request
 from nacl.signing import VerifyKey
 from nacl.exceptions import BadSignatureError

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3.10
+#!/usr/bin/env python3
 """Run the teletask action-v2 certification end to end, with Leash as the provider.
 
 Three legs per task, all signed by the NEAR MPC on Leash's behalf and all CONSTRUCTED by the
@@ -11,6 +11,14 @@ Every signature is verified locally against Leash's derived key BEFORE broadcast
 rebuilt here, in python, independently of the Rust that built the signed bytes: if the two
 implementations disagree the verify fails and nothing is sent.
 """
+import sys
+if sys.version_info[:2] < (3, 8):
+    sys.stderr.write(
+        "WRONG INTERPRETER: the Leash harness requires python >= 3.8, got %d.%d.%d at %s.\n"
+        "NOTHING RAN. Invoke an explicit interpreter, e.g. `python3.10 %s`.\n"
+        % (sys.version_info[0], sys.version_info[1], sys.version_info[2],
+           sys.executable, sys.argv[0]))
+    sys.exit(3)
 import base64, hashlib, json, os, re, subprocess, sys, time, urllib.request
 from nacl.signing import VerifyKey
 from nacl.exceptions import BadSignatureError

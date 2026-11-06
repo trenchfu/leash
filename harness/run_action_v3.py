@@ -11,6 +11,14 @@ SET_POLICY defaults to 0 here, unlike v2. v2 rewrote the agent policy and reset 
 task; doing that would mean the suite grades a policy MY RUNNER wrote seconds earlier instead of
 the one the counterparty pinned and read. The policy under test must be the policy she pinned.
 """
+import sys
+if sys.version_info[:2] < (3, 8):
+    sys.stderr.write(
+        "WRONG INTERPRETER: the Leash harness requires python >= 3.8, got %d.%d.%d at %s.\n"
+        "NOTHING RAN. Invoke an explicit interpreter, e.g. `python3.10 %s`.\n"
+        % (sys.version_info[0], sys.version_info[1], sys.version_info[2],
+           sys.executable, sys.argv[0]))
+    sys.exit(3)
 import hashlib, json, os, struct, sys, time, urllib.request
 
 import run_action_v2 as V

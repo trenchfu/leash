@@ -1,4 +1,4 @@
-#!/usr/bin/env python3.10
+#!/usr/bin/env python3
 """Is this payment's sender a POLICED Leash? A verifier for a counterparty (e.g. teletask).
 
 Receiving a SOL payment and binding it to a sender address proves WHO signed. It does not prove a
@@ -17,6 +17,14 @@ C and D are BOTH required and neither implies the other. An unlocked Leash can b
 A locked account running something else is permanently unpoliced -- the worse failure, because it
 looks maximally trustworthy from the outside.
 """
+import sys
+if sys.version_info[:2] < (3, 8):
+    sys.stderr.write(
+        "WRONG INTERPRETER: the Leash harness requires python >= 3.8, got %d.%d.%d at %s.\n"
+        "NOTHING RAN. Invoke an explicit interpreter, e.g. `python3.10 %s`.\n"
+        % (sys.version_info[0], sys.version_info[1], sys.version_info[2],
+           sys.executable, sys.argv[0]))
+    sys.exit(3)
 import base64, json, sys, time, urllib.request
 
 # Endpoint list, tried in order. The official testnet RPC rate-limits hard under polling (I hit

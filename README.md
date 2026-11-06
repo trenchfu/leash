@@ -31,8 +31,10 @@ Under NEAR Chain Signatures the foreign key is derived from **`(predecessor_acco
 the *immediate caller* and a path string, and nothing else. Verified at source in
 [`near/mpc`](https://github.com/near/mpc) @ `d0fc87b1`:
 
-- `crates/contract/src/api/sign.rs:32` — `sign()` passes `env::predecessor_account_id()`
-- same file — `SignatureRequest::new(domain, payload, &predecessor, &path)`
+- `crates/contract/src/api/sign.rs:36` — `sign()` resolves the caller:
+  `let (domain_config, predecessor) = self.check_request_preconditions(...)`
+- `crates/contract/src/api/sign.rs:63` — that same `predecessor` is what reaches the request:
+  `SignatureRequest::new(request.domain_id, request.payload, &predecessor, &request.path)`
 - `crates/near-mpc-crypto-types/src/kdf.rs:10` — `fn derive_tweak(predecessor_id: &AccountId, path: &str) -> Tweak`
 
 That function signature admits no other input. When the **contract** calls `sign()`, the contract
@@ -66,6 +68,21 @@ can redeploy it with no policy, or act as that account directly. So the guarante
 This is not a footnote; it is the whole thing. A policy contract on an unlocked account is
 security theatre. The harness therefore proves the account is locked against the live network
 rather than this README asserting it.
+
+### Custody status, stated plainly
+
+The property above is **proven**, and it is proven on `leash-locked-7f0c6d.testnet`, which carries
+**zero access keys of any kind** — verify with `view_access_key_list`, it is a public read.
+
+The main development contract `leash-b0c503d6.testnet` **still holds one full-access key.** By the
+argument immediately above, that account's policy is therefore not yet a custody boundary: the key
+holder could redeploy it without the policy. We say so here rather than let a reader infer that the
+headline claim already holds everywhere. Locking it is a deliberate, irreversible owner decision
+and it is pending, not overlooked — and it must come *after* the last intended code change, because
+a locked account cannot be upgraded.
+
+So read the two accounts as what they are: `leash-locked-7f0c6d` is the guarantee demonstrated;
+`leash-b0c503d6` is where the code is still moving.
 
 And trust **moves**, it does not vanish: signatures come from an MPC committee measured at
 **11-of-16** (`v1.signer.state`, epoch 14, block 222869350, read 2026-11-03). Leash removes
@@ -108,15 +125,15 @@ Targets NEAR **testnet** (`v1.signer-prod.testnet`).
 
 | | |
 |---|---|
-| Policy core + Solana message builder | implemented, 14 unit tests, mutation-checked |
-| Contract deployed | `leash-b0c503d6.testnet` |
+| Policy core + Solana message builder | implemented, **72 unit tests**, mutation-checked |
+| Contract deployed | `leash-b0c503d6.testnet` — **still holds 1 full-access key; see Custody status** |
 | Leash's Solana address | `Gqa8HZcVBJ8oHGbUDCxU1DFVfimNKxF1w3jJY9kx5DUL` |
 | Live Ed25519 signature from the MPC | **executed and cryptographically verified** |
 | Transfer landed on Solana devnet | **yes** — finalized in 2 s, payee received exactly 1,000,000 lamports |
 | Refusals proven against the live contract | `harness/prove_the_jail.py` |
 | Refusals recorded on chain | **yes** — returned as a verdict and written to a bounded ring, not reverted |
 | Agent enumeration + lifetime counters | `list_agents`, `get_totals`, `get_recent` |
-| Locked-account proof | **done, 15/15** — attack demonstrated on an unlocked account, refused by the chain on a locked one |
+| Locked-account proof | **done, 15/15** — attack demonstrated on an unlocked account, refused by the chain on a locked one (`leash-locked-7f0c6d.testnet`, **0 keys**) |
 | Session expiry | live, two-sided, mutation-checked |
 | Function-call-key layer | two locks in series, two-sided |
 
