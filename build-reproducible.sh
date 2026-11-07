@@ -24,6 +24,12 @@ echo
 echo "artifact : $W"
 echo "bytes    : $(stat -c %s "$W")"
 echo "sha256   : $(sha256sum "$W" | cut -d' ' -f1)"
-echo "expected : 458234 bytes, c70089857a9efaa0... (see VERSIONS.md)"
+# NO "expected" LINE HERE, DELIBERATELY. It used to print the hash this repo documents, right
+# under the one just computed. the coordinator re-derived these bytes blind on a second machine on
+# 2026-11-07 and reported that the echo disclosed my number to her at the end of her own run --
+# harmless for a deterministic build she had already finished, and fatal for the NEXT independent
+# re-derivation, which is the only instrument that can falsify a reproducibility claim. An
+# instrument states what it MEASURED; the claim lives in VERSIONS.md and the assertion lives in
+# verify.sh, which exits non-zero on drift. Keep those three jobs in three places.
 echo "host paths left in the artifact (must be 0):"
 strings -a "$W" | grep -cE "^(/home|/Users|/root)/" || true
