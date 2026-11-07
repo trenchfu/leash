@@ -55,9 +55,21 @@ from two different `$CARGO_HOME` paths** with no `/home`, `/Users` or `/root` st
 `trim-paths = "all"` would be the one-line in-tree version and is **unstable on cargo 1.95.0**
 (nightly only), which is why this is a script and not a profile key.
 
-Still unproven, and only a second machine can prove it: that the remapped artifact is
-byte-identical on different HARDWARE under the same pinned toolchain. Two `$CARGO_HOME` paths on
-one host is a stronger control than the original claim had, and it is still one host.
+**PROVEN ON A SECOND MACHINE, 2026-11-07 — the coordinator's receipt, not my own measurement.** She pulled
+`7de6acf`, ran `./build-reproducible.sh` on the build host (different hardware,
+`CARGO_HOME=~/.cargo`) without reading this file first, and reported **458,234 bytes,
+`c70089857a9efaa02f72be3469ebe31830a55237b1eaae1515f03a321154fece`, 0 host paths left, rc 0** —
+equal to the the dev host build byte for byte. The remapped artifact therefore reproduces across two
+machines, two `$CARGO_HOME` paths and two source paths. Still untested: a different OS, a different
+libc, and a toolchain installed from anything but rustup.
+
+**A DEFECT SHE FOUND IN MY OWN SCRIPT, worth more than the agreement.** `build-reproducible.sh`
+ended by echoing the hash this file documents, directly under the one it had just computed. Her run
+was already finished and the build is deterministic, so her result stands — but that line would
+anchor the *next* independent re-derivation, and an independent re-derivation is the only instrument
+that can falsify a reproducibility claim. **Removed.** The script now states only what it measured,
+this file carries the claim, and `verify.sh` does the assertion and exits non-zero on drift. Three
+jobs, three places.
 
 **Original claim, left here un-deleted:** "Built from two different absolute paths under
 `rust-toolchain.toml`, it is byte-identical both times and contains zero host paths." True about the
