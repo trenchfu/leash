@@ -28,15 +28,40 @@ RPC's own `code_hash` field (the two agree).
 | artifact | bytes | sha256[:16] | toolchain | embedded host paths | third-party reproducible |
 |---|---:|---|---|---:|---|
 | **deployed** on `leash-b0c503d6` | 459,050 | `db40808d5b6ad22f` | rustup `stable` | **15** | **NO** |
-| **pinned rebuild** (this tree) | 458,442 | `3fe8d7b68eb53696` | `1.95.0` via `rust-toolchain.toml` | 0 | **YES** |
+| **pinned rebuild**, plain `cargo build` | 458,442 | `3fe8d7b68eb53696` | `1.95.0` via `rust-toolchain.toml` | **19** | **NO** |
+| **remapped rebuild** (`./build-reproducible.sh`) | 458,234 | `c70089857a9efaa0` | `1.95.0` via `rust-toolchain.toml` | **0** | **YES**, see the control below |
 
 **The deployed artifact is not reproducible by anyone but its build machine.** It embeds 15 absolute
 paths of the form `/home/<user>/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rust...`.
 Reproducing it requires not merely the same compiler but the same rustup directory at the same
 absolute path. That is the entire 608-byte difference.
 
-**The pinned build is portable.** Built from two different absolute paths under
-`rust-toolchain.toml`, it is byte-identical both times and contains zero host paths.
+**RETRACTED 2026-11-07: the plain pinned build is NOT portable.** The claim below was that it
+"contains zero host paths". It contains **nineteen** — every dependency source file that appears in
+a panic message, under `$CARGO_HOME/registry/src/...`. The control that produced the claim moved the
+SOURCE tree and left `$CARGO_HOME` where it was, so it was blind to the one prefix that actually
+leaked. Measured both ways:
+
+```
+plain build, CARGO_HOME=/home/<user>/.cargo        -> 458,442 B  3fe8d7b68eb53696   19 host paths
+plain build, CARGO_HOME=<another absolute path>    -> 459,714 B  31076872899ecb49   19 host paths
+remapped build, either CARGO_HOME                  -> 458,234 B  c70089857a9efaa0    0 host paths
+```
+
+The middle row is the falsifier the first claim never ran: a different `$CARGO_HOME` gives a
+different artifact. The third row is the fix — `./build-reproducible.sh` passes
+`--remap-path-prefix` for both `$CARGO_HOME` and the source dir, and the result is **byte-identical
+from two different `$CARGO_HOME` paths** with no `/home`, `/Users` or `/root` string left in it.
+`trim-paths = "all"` would be the one-line in-tree version and is **unstable on cargo 1.95.0**
+(nightly only), which is why this is a script and not a profile key.
+
+Still unproven, and only a second machine can prove it: that the remapped artifact is
+byte-identical on different HARDWARE under the same pinned toolchain. Two `$CARGO_HOME` paths on
+one host is a stronger control than the original claim had, and it is still one host.
+
+**Original claim, left here un-deleted:** "Built from two different absolute paths under
+`rust-toolchain.toml`, it is byte-identical both times and contains zero host paths." True about the
+source path, false about the artifact.
 
 ```
 <repo>/contract          -> 458,442  3fe8d7b68eb53696cd6c8c23862a394d

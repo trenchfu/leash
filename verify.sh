@@ -30,8 +30,13 @@ say "1/3  offline policy suite"
 
 say "2/3  reproducible build vs the deployed artifact"
 TGT="$(mktemp -d)"
-( cd "$HERE/contract" && CARGO_TARGET_DIR="$TGT" cargo build --release \
-    --target wasm32-unknown-unknown 2>&1 | tail -1 )
+# The remap flags are what make these bytes independent of where THIS machine keeps its
+# cargo registry; without them a different $CARGO_HOME gives a different artifact (measured:
+# 458,442 vs 459,714 B). --cfg near is repeated because RUSTFLAGS REPLACES the config rustflags.
+( cd "$HERE/contract" \
+  && CARGO_TARGET_DIR="$TGT" \
+     RUSTFLAGS="--cfg near --remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}=/cargo --remap-path-prefix=$HERE/contract=/src" \
+     cargo build --release --target wasm32-unknown-unknown 2>&1 | tail -1 )
 LOCAL_WASM="$TGT/wasm32-unknown-unknown/release/leash.wasm"
 if [ ! -f "$LOCAL_WASM" ]; then echo "BUILD FAILED"; fail=1; else
   "$PY" - "$RPC" "$CONTRACT" "$LOCAL_WASM" <<'PY'
@@ -47,7 +52,9 @@ chain = base64.b64decode(res["code_base64"])
 local = open(path, "rb").read()
 ch, lh = hashlib.sha256(chain).hexdigest(), hashlib.sha256(local).hexdigest()
 DEPLOYED_SHA = "db40808d5b6ad22f733f2ff674d91913af1eb21a2e81a5f41e4012816922b30b"
-PORTABLE_SHA = "3fe8d7b68eb53696cd6c8c23862a394d" + ""  # prefix check; see VERSIONS.md
+# The REMAPPED build's hash. The earlier 3fe8d7b6... was the plain pinned build, which carries
+# 19 absolute $CARGO_HOME paths and is NOT portable -- retracted in VERSIONS.md 2026-11-07.
+PORTABLE_SHA = "c70089857a9efaa0" 
 print("   deployed %7d bytes  sha256 %s" % (len(chain), ch))
 print("   rebuilt  %7d bytes  sha256 %s" % (len(local), lh))
 if ch == lh:
@@ -55,7 +62,8 @@ if ch == lh:
     sys.exit(0)
 print("   DIFFERENT, AND EXPECTED. The deployed artifact predates the toolchain pin and")
 print("   embeds absolute paths from its build machine, so only that machine can reproduce")
-print("   it. This rebuild is the PORTABLE one: identical bytes from any path. See VERSIONS.md.")
+print("   it. This rebuild is the REMAPPED one: byte-identical from two different $CARGO_HOME")
+print("   paths, with no /home, /Users or /root string left in it. See VERSIONS.md.")
 ok = ch == DEPLOYED_SHA and lh.startswith(PORTABLE_SHA)
 print("   deployed matches the documented hash: %s" % (ch == DEPLOYED_SHA))
 print("   rebuild  matches the documented portable hash: %s" % lh.startswith(PORTABLE_SHA))
