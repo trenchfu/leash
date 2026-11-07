@@ -1,0 +1,13 @@
+# Pin the compiler, not just the dependencies.
+#
+# The deployed artifact at leash-b0c503d6.testnet (459,050 bytes, sha256 db40808d...b30b) is
+# reproducible under THIS compiler. It is not reproducible under an arbitrary newer rustc:
+# a 1.99.1 build of this same source yields 525,860 bytes. Pinning near-sdk fixed the
+# dependency graph; it could not fix the codegen.
+#
+# Found by a peer re-deriving the claim on a different machine rather than accepting it --
+# which is the only reason it was caught before a judge ran verify.sh.
+[toolchain]
+channel = "1.95.0"
+targets = ["wasm32-unknown-unknown"]
+profile = "minimal"

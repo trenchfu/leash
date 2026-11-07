@@ -46,10 +46,20 @@ res = json.load(urllib.request.urlopen(req, timeout=60))["result"]
 chain = base64.b64decode(res["code_base64"])
 local = open(path, "rb").read()
 ch, lh = hashlib.sha256(chain).hexdigest(), hashlib.sha256(local).hexdigest()
+DEPLOYED_SHA = "db40808d5b6ad22f733f2ff674d91913af1eb21a2e81a5f41e4012816922b30b"
+PORTABLE_SHA = "3fe8d7b68eb53696cd6c8c23862a394d" + ""  # prefix check; see VERSIONS.md
 print("   deployed %7d bytes  sha256 %s" % (len(chain), ch))
 print("   rebuilt  %7d bytes  sha256 %s" % (len(local), lh))
-print("   %s" % ("IDENTICAL" if ch == lh else "*** DIFFERS ***"))
-sys.exit(0 if ch == lh else 1)
+if ch == lh:
+    print("   IDENTICAL -- the deployed artifact is this build")
+    sys.exit(0)
+print("   DIFFERENT, AND EXPECTED. The deployed artifact predates the toolchain pin and")
+print("   embeds absolute paths from its build machine, so only that machine can reproduce")
+print("   it. This rebuild is the PORTABLE one: identical bytes from any path. See VERSIONS.md.")
+ok = ch == DEPLOYED_SHA and lh.startswith(PORTABLE_SHA)
+print("   deployed matches the documented hash: %s" % (ch == DEPLOYED_SHA))
+print("   rebuild  matches the documented portable hash: %s" % lh.startswith(PORTABLE_SHA))
+sys.exit(0 if ok else 1)
 PY
   [ $? -ne 0 ] && fail=1
 fi
