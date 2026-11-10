@@ -64,9 +64,17 @@ the method is auditable, not so a stranger can re-run them.
 | `harness/run_action_v2.py`, `run_action_v3.py` | teletask certification with Leash as the provider, across both asset kinds |
 | `harness/land_spl_transfer.py` | the same guarantee for an SPL `TransferChecked`, not just lamports |
 
-Environment overrides (so one runner drives both the dev and the locked contract rather than a
-second copy that could drift): `LEASH_CONTRACT`, `LEASH_ADDRESS`, `LEASH_RECIPIENT`,
-`LEASH_LAMPORTS`, `LEASH_TASKS`, `LEASH_SET_POLICY`, `LEASH_SKIP_ACCEPT`.
+### Local fixtures (`harness/.state/`)
+
+Harness scripts need NEAR account ids and Solana addresses from a lab run. Those used to sit as
+tracked dot-files in the repo root; they are now **local-only**:
+
+- Put fixtures in `harness/.state/` (gitignored), same filenames as before
+  (`.contract-account`, `.agent-account`, `.solana-address`, …).
+- Or set env overrides (see `harness/state_io.py`): `LEASH_CONTRACT`, `LEASH_ADDRESS`,
+  `LEASH_RECIPIENT`, `LEASH_AGENT`, `LEASH_OWNER`, `LEASH_LOCKED`, `LEASH_ATTACK`,
+  `LEASH_ROGUE_ACCOUNT`, `LEASH_DENIED_RECIPIENT`, plus `LEASH_STATE_DIR` to relocate the folder.
+- Also used by runners: `LEASH_LAMPORTS`, `LEASH_TASKS`, `LEASH_SET_POLICY`, `LEASH_SKIP_ACCEPT`.
 
 Widening the harness widens no authority: the policy still refuses any recipient the owner has not
 allowlisted, on chain.

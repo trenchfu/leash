@@ -31,7 +31,7 @@ if sys.version_info[:2] < (3, 8):
 import json, os, re, subprocess, sys, time, urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
-rd = lambda n: open(os.path.join(ROOT, n)).read().strip()
+from state_io import rd
 # ONE ACCOUNT PER CLAIM. The first attempt reused a single account for both halves: the rogue's
 # seize() had written state, Leash's new() is #[init] and refuses existing state, so the "restore"
 # silently failed and the account was locked with the ROGUE on it. The harness caught that, but

@@ -1,8 +1,8 @@
 # Dependency licence inventory
 
-**Measured 2026-11-07 on the dev host from `contract/Cargo.lock` plus each crate's own `Cargo.toml` in the
-local cargo registry.** This is the release gate my own Teletask SDK assessment named
-("dependency-license inventory") applied to this repo. It is a *publication* gate, not a
+**Measured 2026-11-07 on the build machine from `contract/Cargo.lock` plus each crate's own
+`Cargo.toml` in the local cargo registry.** This is the release gate a Teletask SDK assessment
+named ("dependency-license inventory") applied to this repo. It is a *publication* gate, not a
 prerequisite for carrying a LICENSE file.
 
 ## Result

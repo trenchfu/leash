@@ -21,14 +21,14 @@ from solana_lib import b58decode, b58encode, build_transfer_message, build_signe
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-rd = lambda n: open(os.path.join(ROOT, n)).read().strip()
+from state_io import rd
 
 CONTRACT, AGENT = rd(".contract-account"), rd(".agent-account")
 LEASH_ADDR = rd(".solana-address")
 # overridable so this harness can land a transfer to any ALLOWLISTED recipient, not just the
 # fixture. The policy still decides: an address the owner has not allowlisted is refused on chain,
-# so widening the harness widens no authority.
-RECIPIENT = os.environ.get("LEASH_RECIPIENT") or rd(".allowed-recipient")
+# so widening the harness widens no authority. (LEASH_RECIPIENT is also honored inside rd().)
+RECIPIENT = rd(".allowed-recipient")
 NEAR = os.path.expanduser("~/.local/bin/near")
 DEVNET = "https://api.devnet.solana.com"
 NEAR_RPC = "https://rpc.testnet.near.org"

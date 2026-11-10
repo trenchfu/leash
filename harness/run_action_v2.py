@@ -25,11 +25,12 @@ from nacl.exceptions import BadSignatureError
 import solana_lib as S
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-rd = lambda n: open(os.path.join(ROOT, n)).read().strip()
+from state_io import rd
 # Which Leash to drive. Defaults to the dev contract; the locked snapshot is selected by env so
 # the same runner proves both without a second copy that could drift from this one.
-CONTRACT = os.environ.get("LEASH_CONTRACT") or rd(".contract-account")
-LEASH = os.environ.get("LEASH_ADDRESS") or rd(".solana-address")
+# LEASH_CONTRACT / LEASH_ADDRESS env overrides are honored inside rd().
+CONTRACT = rd(".contract-account")
+LEASH = rd(".solana-address")
 OWNER, AGENT = rd(".owner-account"), rd(".agent-account")
 NEAR = os.path.expanduser("~/.local/bin/near")
 DEVNET = "https://api.devnet.solana.com"

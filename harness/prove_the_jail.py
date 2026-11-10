@@ -21,7 +21,7 @@ import json, os, re, subprocess, sys, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-def rd(n): return open(os.path.join(ROOT, n)).read().strip()
+from state_io import rd
 
 CONTRACT = rd(".contract-account")
 OWNER    = rd(".owner-account")

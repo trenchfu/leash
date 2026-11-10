@@ -3,6 +3,23 @@ node_modules/
 _vendor-readonly/
 *.wasm
 .env
+.env.*
 neardev/
 __pycache__/
 *.pyc
+
+# Local harness fixtures (NEAR/Solana account ids and addresses from test runs).
+# Public identifiers, not secrets — but not part of the published tree.
+harness/.state/
+# Legacy root locations (pre-C247); ignore if recreated by an old script.
+.agent-account
+.allowed-recipient
+.attack-account
+.contract-account
+.denied-recipient
+.locked-account
+.owner-account
+.policybound-account
+.policybound-address
+.solana-address
+.spent-account-locked-with-rogue

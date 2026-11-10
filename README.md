@@ -116,7 +116,14 @@ cd contract && cargo test          # pure policy + message-construction suite, n
 ```
 
 Deployment, the live signature, and the locked-account proof are in `harness/` — see
-[`docs/RUNBOOK.md`](docs/RUNBOOK.md).
+[`docs/RUNBOOK.md`](docs/RUNBOOK.md). Local harness account/address fixtures live in
+`harness/.state/` (gitignored) or env vars — not in the repo root.
+
+## Mainnet
+
+**Testnet only today.** There is no mainnet deploy. How to build and verify a portable code hash,
+how to deploy with placeholders, policy defaults, costs ("measure before deploy"), and the trust
+model: [`docs/MAINNET.md`](docs/MAINNET.md). Build record: [`VERSIONS.md`](VERSIONS.md).
 
 ## Status
 

@@ -55,13 +55,13 @@ from two different `$CARGO_HOME` paths** with no `/home`, `/Users` or `/root` st
 `trim-paths = "all"` would be the one-line in-tree version and is **unstable on cargo 1.95.0**
 (nightly only), which is why this is a script and not a profile key.
 
-**PROVEN ON A SECOND MACHINE, 2026-11-07 — the coordinator's receipt, not my own measurement.** She pulled
-`7de6acf`, ran `./build-reproducible.sh` on the build host (different hardware,
-`CARGO_HOME=~/.cargo`) without reading this file first, and reported **458,234 bytes,
+**PROVEN ON A SECOND MACHINE, 2026-11-07 — an independent peer's receipt, not my own measurement.**
+They pulled `7de6acf`, ran `./build-reproducible.sh` on different hardware
+(`CARGO_HOME=/home/<user>/.cargo`) without reading this file first, and reported **458,234 bytes,
 `c70089857a9efaa02f72be3469ebe31830a55237b1eaae1515f03a321154fece`, 0 host paths left, rc 0** —
-equal to the the dev host build byte for byte. The remapped artifact therefore reproduces across two
-machines, two `$CARGO_HOME` paths and two source paths. Still untested: a different OS, a different
-libc, and a toolchain installed from anything but rustup.
+equal to the first-machine build byte for byte. The remapped artifact therefore reproduces across
+two machines, two `$CARGO_HOME` paths and two source paths. Still untested: a different OS, a
+different libc, and a toolchain installed from anything but rustup.
 
 **A DEFECT SHE FOUND IN MY OWN SCRIPT, worth more than the agreement.** `build-reproducible.sh`
 ended by echoing the hash this file documents, directly under the one it had just computed. Her run
@@ -76,7 +76,7 @@ jobs, three places.
 source path, false about the artifact.
 
 ```
-<repo>/contract          -> 458,442  3fe8d7b68eb53696cd6c8c23862a394d
+/home/<user>/.../leash/contract              -> 458,442  3fe8d7b68eb53696cd6c8c23862a394d
 /tmp/.../scratchpad/pathtest/contract        -> 458,442  3fe8d7b68eb53696cd6c8c23862a394d
 ```
 

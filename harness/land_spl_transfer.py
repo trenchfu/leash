@@ -30,7 +30,7 @@ from solana_lib import b58decode, build_signed_tx, build_transfer_checked_messag
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-rd = lambda n: open(os.path.join(ROOT, n)).read().strip()
+from state_io import rd
 
 CONTRACT, AGENT = rd(".contract-account"), rd(".agent-account")
 LEASH_ADDR = rd(".solana-address")

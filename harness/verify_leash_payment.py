@@ -158,7 +158,7 @@ def verify(contract, path, claimed_sender, pinned_hash=None):
 
     # E identifies the actual BYTECODE. D only shows that something policy-SHAPED is deployed, and
     # a rogue can expose get_agent_policy and get_mpc_contract while signing anything, so D alone
-    # is imitable. (Found by the coordinator reviewing this file.)
+    # is imitable. (Found in review of this file.)
     #
     # E and C are COUPLED, and that resolves what looks like a contradiction with "probe the
     # capability, not the version". Pinning an exact build is WRONG for a mutable contract -- it
@@ -211,9 +211,7 @@ def cli(contract, path, sender, pinned_hash=None):
 def main():
     if len(sys.argv) in (4, 5):
         return cli(*sys.argv[1:])
-    import os
-    ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    rd = lambda n: open(os.path.join(ROOT, n)).read().strip()
+    from state_io import rd
     LOCKED  = rd(".locked-account")        # Leash, locked
     DEMO    = rd(".contract-account")      # Leash, UNLOCKED
     ROGUE   = rd(".spent-account-locked-with-rogue")  # locked, but running the rogue
