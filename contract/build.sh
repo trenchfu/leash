@@ -28,7 +28,29 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 CH="${CARGO_HOME:-$HOME/.cargo}"
-export RUSTFLAGS="--cfg near --remap-path-prefix=${CH}/registry=/cargo-registry --remap-path-prefix=${CH}/git=/cargo-git"
+SYSROOT="$(rustc --print sysroot)"
+RUSTC_HASH="$(rustc -vV | awk '/^commit-hash/{print $2}')"
+# THE STANDARD LIBRARY'S PATHS ARE A SECOND, SNEAKIER INPUT -- found 2026-11-11 by diffing the
+# DEPLOYED artifact against a faithful rebuild of its own commit. All 608 differing bytes were std
+# source paths, and rustc spells them TWO ways depending on an OPTIONAL component:
+#   rust-src INSTALLED  -> /home/<user>/.rustup/toolchains/<ch>/lib/rustlib/src/rust/library/...
+#   rust-src ABSENT     -> /rustc/<40-hex-commit>/library/...
+# The SECOND form is baked into the shipped std rlib by upstream's own remap, so --remap-path-prefix
+# cannot rewrite it -- and it does not need to: it carries no user path and is already machine
+# independent. It is the CANONICAL form and the one this build requires. The first form is the
+# hazard, and the sysroot remap below converts it if some machine has rust-src installed.
+# rust-src is therefore a BUILD INPUT: rust-toolchain.toml pins `profile = "minimal"`, which
+# excludes it. The deployed 2026-11-05 artifact was built with it present, under the `stable` alias
+# and before that pin existed, which is why the deployed bytes are not reachable under this recipe.
+# So two machines, both correctly pinned to the same rustc, still produce different bytes depending
+# on whether someone ran `rustup component add rust-src`. The deployed build had it installed; this
+# machine does not, which is the only reason the first version of this script looked correct here.
+# Both spellings are mapped onto ONE token so the artifact is invariant to that component.
+export RUSTFLAGS="--cfg near \
+ --remap-path-prefix=${CH}/registry=/cargo-registry \
+ --remap-path-prefix=${CH}/git=/cargo-git \
+ --remap-path-prefix=${SYSROOT}/lib/rustlib/src/rust=/rust-std \
+"
 echo "build.sh: CARGO_HOME=${CH}"
 echo "build.sh: RUSTFLAGS=${RUSTFLAGS}"
 rustc --version --verbose | sed -n '1p;/LLVM/p' | sed 's/^/build.sh: /'
@@ -37,7 +59,7 @@ cargo --version | sed 's/^/build.sh: /'
 cargo build --locked --target wasm32-unknown-unknown --release
 W="${CARGO_TARGET_DIR:-target}/wasm32-unknown-unknown/release/leash.wasm"
 
-LEAK=$(strings -a "$W" | grep -c '/home/\|/Users/\|/root/' || true)
+LEAK=$(strings -a "$W" | grep -c '/home/\|/Users/\|/root/\|\.rustup' || true)
 if [ "$LEAK" != "0" ]; then
   echo "build.sh: REFUSED -- $LEAK absolute path(s) still embedded in the artifact:" >&2
   strings -a "$W" | grep -o '/home/[^ ]*\|/Users/[^ ]*\|/root/[^ ]*' | sort -u | head -5 >&2
@@ -46,6 +68,9 @@ if [ "$LEAK" != "0" ]; then
 fi
 # Positive control: the remap must have ACTUALLY fired, not silently matched nothing.
 MAPPED=$(strings -a "$W" | grep -c '/cargo-registry' || true)
+# The std paths must be in ONE of the two machine-independent forms, and present either way:
+# zero of both would mean the scan above matched nothing and proved nothing.
+MAPSTD=$(strings -a "$W" | grep -c '/rust-std\|/rustc/' || true)
 if [ "$MAPPED" = "0" ]; then
   echo "build.sh: REFUSED -- no remapped path found. Zero absolute paths AND zero remapped paths" >&2
   echo "build.sh: means the check proved nothing: the scan may simply have matched nothing." >&2
@@ -64,4 +89,9 @@ echo "build.sh: artifact  $W"
 echo "build.sh: bytes     $SZ"
 echo "build.sh: sha256    $SHA"
 echo "build.sh: code_hash $B58"
-echo "build.sh: embedded absolute paths 0, remapped paths $MAPPED -> reproducible"
+if [ "$MAPSTD" = "0" ]; then
+  echo "build.sh: REFUSED -- no /rust-std or /rustc/ path found. The std paths are unaccounted" >&2
+  echo "build.sh: for, so the clean scan above proves nothing." >&2
+  exit 1
+fi
+echo "build.sh: embedded absolute paths 0, remapped registry $MAPPED, std paths $MAPSTD -> reproducible"
