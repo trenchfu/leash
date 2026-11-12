@@ -197,19 +197,29 @@ is kept rather than deleted so that its hash can be *traced* if it turns up in a
 
 | account | role | bytes | code hash (base58) | sha256[:16] |
 |---|---|---:|---|---|
-| `leash-b0c503d6.testnet` | main contract | 459,050 | `FksLFKoeD6Xco1D9omAQ2hrhczMwNjVnt27T2u89kkbt` | `db40808d5b6ad22f` | **REPLACED 2026-11-11** — see *Deployed 2026-11-11* |
-| `leash-locked-7f0c6d.testnet` | locked snapshot (access-key-less) | 305,580 | `4iHvhQNszRYgJsU27o37okn5nZ1n9icYJ68RjaksfLYq` | `372703139fccf4e6` |
+| `leash-b0c503d6.testnet` | main contract, **LOCKED 2026-11-11** | 458,248 | `59HB5memEzCQMXoWe6mD7KX3ysvYMZoVBHPXVyt4tr64` | `3d8dae96c0eea6ee` | reproducible; locked in tx `DFG8xfJR6TMar32CGWG31GE4T6JpZMWVQJk6ydsghmGW` |
+| ~~`leash-b0c503d6.testnet`~~ | superseded artifact | 459,050 | `FksLFKoeD6Xco1D9omAQ2hrhczMwNjVnt27T2u89kkbt` | `db40808d5b6ad22f` | **REPLACED 2026-11-11** — see *Deployed 2026-11-11*; NOT re-derivable |
+| `leash-locked-7f0c6d.testnet` | locked snapshot (access-key-less), **superseded code** | 305,580 | `4iHvhQNszRYgJsU27o37okn5nZ1n9icYJ68RjaksfLYq` | `372703139fccf4e6` | locked BEFORE the WL-CL-020 fix, so it carries that defect permanently |
 
-### Reproducibility status — TWO ARTIFACTS, ONLY ONE OF THEM PORTABLE
+### Reproducibility status — HISTORY as of 2026-11-05..07, SUPERSEDED 2026-11-11
+
+> **READ THE DATE ON THIS SECTION.** It described the deployment *before* the redeploy, when the
+> deployed artifact was the non-portable one. That is no longer true: the account now runs
+> **458,248 B / `3d8dae96c0eea6ee`**, built by `contract/build.sh`, re-derived byte-for-byte on a
+> second machine, and the account is locked, so it cannot drift again. The table below is kept
+> because three superseded artifacts are cited in older notes and a reader who meets one of those
+> numbers needs to be able to place it — not as a statement of what is deployed.
 
 | artifact | bytes | sha256[:16] | toolchain | embedded host paths | third-party reproducible |
 |---|---:|---|---|---:|---|
-| **deployed** on `leash-b0c503d6` | 459,050 | `db40808d5b6ad22f` | rustup `stable` | **15** | **NO** |
+| **DEPLOYED NOW, locked** (`contract/build.sh`) | 458,248 | `3d8dae96c0eea6ee` | `1.95.0` via `rust-toolchain.toml` | **0** | **YES** — re-derived on a second machine |
+| ~~deployed 2026-11-05~~ on `leash-b0c503d6` | 459,050 | `db40808d5b6ad22f` | rustup `stable` | **15** | **NO** — replaced 2026-11-11 |
 | **pinned rebuild**, plain `cargo build` | 458,442 | `3fe8d7b68eb53696` | `1.95.0` via `rust-toolchain.toml` | **19** | **NO** |
 | **remapped rebuild** (`./build-reproducible.sh`) | 458,234 | `c70089857a9efaa0` | `1.95.0` via `rust-toolchain.toml` | **0** | **YES**, see the control below |
 
-**The deployed artifact is not reproducible by anyone but its build machine.** It embeds 15 absolute
-paths of the form `/home/<user>/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rust...`.
+**The artifact deployed on 2026-11-05 was not reproducible by anyone but its build machine** — past
+tense since the 2026-11-11 redeploy, which replaced it precisely because of this. It embedded 15
+absolute paths of the form `/home/<user>/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rust...`.
 Reproducing it requires not merely the same compiler but the same rustup directory at the same
 absolute path. That is the entire 608-byte difference.
 
@@ -296,3 +306,51 @@ control, because a pin that constrains nothing is decoration:
 committed `Cargo.lock` is what actually fixes the version at 5.30.0. Reading a dependency's version
 off `Cargo.toml` instead of off the lock or the artifact is how this repo's own history recorded a
 wrong SDK version once; the lock is the source of truth here.
+
+## LOCKED 2026-11-11 — and what a key count does not prove
+
+`leash-b0c503d6.testnet` went from **1 full-access key to 0** in tx
+`DFG8xfJR6TMar32CGWG31GE4T6JpZMWVQJk6ydsghmGW`. The key deleted was
+`ed25519:8B88EfB3hzJwrsCbzrL2CRgx99G2xXXjvy9L8QWxnju5`, which I held; no other signature was
+involved, and saying otherwise would be the second time in two days I attributed my own key's
+action to someone else.
+
+ORDER MATTERS AND IT WAS THE WHOLE POINT. The lock came after the WL-CL-020 renewal fix was
+deployed and proven on chain, and after the build was re-derived byte-for-byte on a second machine.
+`leash-locked-7f0c6d.testnet` is the counter-example in our own deployment: it was locked earlier, on
+code that predates the fix, so it carries the renewal clobber **permanently**. A lock is not a
+safety measure applied to code; it is a promise that the code will never change, and that promise
+is only worth making about code you have finished verifying.
+
+THREE MEASUREMENTS AFTER THE LOCK, because `FullAccess=0` on its own is a key count, not a
+guarantee:
+
+1. **Foreclosure, enforced by the chain.** A redeploy of DIFFERENT bytes (`9gZgpFd9gSiD94k38Dre…`)
+   was attempted *with the signing key file still on disk at
+   `~/.near-credentials/testnet/leash-b0c503d6.testnet.json`*. The network refused it — "Access key
+   ... does not exist while viewing" — the CLI exited **1**, and `view_code` afterwards still
+   returned `59HB5mem…`. Deleting the local key file first would have produced a refusal that
+   proved nothing: the client would simply have had nothing to sign with. Leaving it is what makes
+   this a positive control.
+   The exit code was read directly, NOT through a pipe into `tail` — a pipeline reports the LAST
+   command's status, which on the first attempt printed a reassuring `rc=0` over a failed command.
+2. **The contract still works.** Both money paths re-run after the lock: native SOL devnet
+   `ahYCpEPMJV9umftwL6EFH4qCH67M7i6zuG4U4onxHoGkyjoqzTmuRRuWN4rtg2orUZzgMx7mq9iLfbWxCdGT6xQ`
+   and SPL `TransferChecked` devnet
+   `3Kz2cSWxRcFR3teYw9HVhU6TTtihQLpSQCs8xtGzq73Kwq2cUgTjqgkT4QVQfwDvJxRGdQ6zsDR2kHUHsZH2Xg8p`.
+   Each landed the exact amount, measured from the transaction's own pre/post balances rather than
+   an account balance over a window. Owner- and agent-gated FUNCTION CALLS and MPC signing require
+   no access key on this account, which is why an immutable contract is still a usable one.
+3. **No state moved.** Policy checked field by field, both mint rules, and lifetime counters. The
+   only delta was `get_totals [22,5,27] -> [23,5,28]`, and it was ATTRIBUTED rather than explained:
+   `get_recent_typed {"limit":3}` shows the newest row is my own SPL authorisation. Refusals stayed
+   at 5, so the lock refused nothing.
+
+WHAT THE LOCK FORECLOSES, FOR THE RECORD: new code, in-place `migrate`, re-pinning the MPC signer,
+rotating the owner account, and deleting the account. New development goes to a NEW contract. What
+survives: every view, every owner-gated and agent-gated function call, and MPC signing.
+
+A NOTE ON THE AUDIT LOG, kept here because it has misled me once already. `get_recent_typed` rows
+say "signature requested" — they record an AUTHORISATION, not a settlement. The settlement evidence
+is the devnet signature plus the per-transaction balance delta. Five allowed SPL rows once stood
+against three landed transfers, which is how WL-CL-015 was found.

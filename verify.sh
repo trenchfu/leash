@@ -4,7 +4,7 @@
 # Proves three things and says which is which:
 #   1. the offline policy suite passes
 #   2. this source rebuilds the EXACT bytes deployed at leash-b0c503d6.testnet
-#   3. the account holding the proven custody guarantee has ZERO access keys
+#   3. BOTH accounts -- the main contract and the attack-experiment one -- have ZERO access keys
 #
 # Needs: rust stable + wasm32-unknown-unknown, python3 (>=3.8), curl.
 set -u
@@ -84,7 +84,7 @@ PY
 fi
 rm -rf "$TGT"
 
-say "3/3  custody: the proven account must hold ZERO access keys"
+say "3/3  custody: BOTH accounts must hold ZERO access keys"
 "$PY" - "$RPC" "$LOCKED" "$CONTRACT" <<'PY'
 import json, sys, urllib.request
 rpc = sys.argv[1]
@@ -100,8 +100,12 @@ cn, cf = keys(sys.argv[3])
 print("   %-30s keys=%d FullAccess=%d  %s" % (sys.argv[2], ln, lf,
       "LOCKED" if lf == 0 else "*** NOT LOCKED ***"))
 print("   %-30s keys=%d FullAccess=%d  %s" % (sys.argv[3], cn, cf,
-      "locked" if cf == 0 else "still upgradable (stated in README: Custody status)"))
-sys.exit(0 if lf == 0 else 1)
+      "LOCKED" if cf == 0 else "*** NOT LOCKED ***"))
+# LOCKED 2026-11-11. This used to PASS while the main contract still held a full-access key, and
+# merely printed "still upgradable" -- a true statement that the exit code ignored. Now both
+# accounts must be key-less, so if anyone ever re-creates a key on either one this FAILS instead
+# of narrating it. A line that reports a weaker state without affecting the verdict is decoration.
+sys.exit(0 if (lf == 0 and cf == 0) else 1)
 PY
 [ $? -ne 0 ] && fail=1
 

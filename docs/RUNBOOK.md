@@ -39,8 +39,9 @@ curl -s -X POST https://rpc.testnet.near.org -H 'content-type: application/json'
 
 | claim | account / id | independent check |
 |---|---|---|
-| contract deployed | `leash-b0c503d6.testnet` | `view_code` → 459,050 bytes, hash `FksLFKoeD6Xco1D9omAQ2hrhczMwNjVnt27T2u89kkbt` |
+| contract deployed | `leash-b0c503d6.testnet` | `view_code` → 458,248 bytes, hash `59HB5memEzCQMXoWe6mD7KX3ysvYMZoVBHPXVyt4tr64` (redeployed 2026-11-11 as the reproducible build; the previous 459,050 B / `FksLFKoe…` artifact is superseded and is **not** re-derivable — see VERSIONS.md) |
 | the account is **locked** | `leash-locked-7f0c6d.testnet` | `view_access_key_list` → **zero** `FullAccess` keys |
+| the MAIN contract is **locked** | `leash-b0c503d6.testnet` | `view_access_key_list` → **zero** keys of any kind, since 2026-11-11 (tx `DFG8xfJR6TMar32CGWG31GE4T6JpZMWVQJk6ydsghmGW`) |
 | Leash's Solana address | `Gqa8HZcVBJ8oHGbUDCxU1DFVfimNKxF1w3jJY9kx5DUL` | Solana **devnet** account history |
 | the MPC signer | `v1.signer-prod.testnet` | `state` → committee threshold |
 

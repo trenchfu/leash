@@ -116,8 +116,17 @@ redeploy proves that something I never showed was dangerous is now prevented.
 | D | `leash-locked-7f0c6d` (fresh) | Leash deployed, then **1 → 0 full-access keys** on chain |
 | E | same, **locked** | redeploy **refused by the CHAIN**: *"Access key for public key ed25519:EmcE2p… does not exist"*; the rogue did not land; Leash is still the deployed code |
 
+| F | `leash-b0c503d6` (the MAIN contract, 2026-11-11) | locked **1 → 0** keys in tx `DFG8xfJR6TMar32CGWG31GE4T6JpZMWVQJk6ydsghmGW`; a redeploy of *different* bytes (`9gZgpFd9…`) was then refused by the CHAIN — *"Access key for public key ed25519:8B88Ef… does not exist"*, CLI exit 1 — **with the signing key file still present on disk**; `view_code` after the attempt still returns `59HB5mem…` |
+| G | same, after the lock | **both money paths still land**: native SOL devnet `ahYCpEPM…` and SPL `TransferChecked` devnet `3Kz2cSWx…`, each the exact amount, measured from the transaction's own pre/post balances. Lifetime counters, the policy field-by-field and both mint rules unchanged apart from those transfers |
+
 Arm E's rejection is **chain-level**, not a client pre-check — which is the distinction left open by
 the function-call-key test above, and it is closed here.
+
+Arm F repeats that experiment on the account that actually matters, and arm G is the half an
+attacker would hope you skip: a contract can be made immutable and *broken* at the same time, and a
+key count cannot tell the two apart. Note also what arm F does **not** claim — the local key file
+was left in place deliberately, because a refusal observed after deleting the key file would be
+indistinguishable from the client simply having nothing to sign with.
 
 ### Two mistakes inside this proof, both caught by the harness
 

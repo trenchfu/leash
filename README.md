@@ -71,18 +71,37 @@ rather than this README asserting it.
 
 ### Custody status, stated plainly
 
-The property above is **proven**, and it is proven on `leash-locked-7f0c6d.testnet`, which carries
-**zero access keys of any kind** — verify with `view_access_key_list`, it is a public read.
+**Both accounts now carry zero access keys of any kind** — verify with `view_access_key_list` on
+either one, it is a public read that needs nothing from us.
 
-The main development contract `leash-b0c503d6.testnet` **still holds one full-access key.** By the
-argument immediately above, that account's policy is therefore not yet a custody boundary: the key
-holder could redeploy it without the policy. We say so here rather than let a reader infer that the
-headline claim already holds everywhere. Locking it is a deliberate, irreversible owner decision
-and it is pending, not overlooked — and it must come *after* the last intended code change, because
-a locked account cannot be upgraded.
+`leash-b0c503d6.testnet`, the main contract, was **locked on 2026-11-11** in tx
+`DFG8xfJR6TMar32CGWG31GE4T6JpZMWVQJk6ydsghmGW`, after the last intended code change and not before —
+a locked account cannot be upgraded, so the order was load-bearing. Its policy is therefore a
+custody boundary by the argument immediately above: there is no key holder who could redeploy it
+without the policy, because there is no key.
 
-So read the two accounts as what they are: `leash-locked-7f0c6d` is the guarantee demonstrated;
-`leash-b0c503d6` is where the code is still moving.
+Three things were measured after the lock rather than assumed, because a key count is not a
+guarantee:
+
+* **The foreclosure is enforced by the chain, not by a client.** A redeploy of *different* bytes
+  (`9gZgpFd9gSiD94k38DreFL9Md3ZxiVzXwS4wP7VZvceN`) was attempted with the signing key file still
+  present on disk. The network refused it — *"Access key for public key ed25519:8B88Ef… does not
+  exist"* — the CLI exited non-zero, and `view_code` afterwards still returns the deployed hash.
+  The local key file existing is what makes this a control instead of an absence.
+* **The contract still works.** Both money paths were re-run *against the locked contract*: a
+  native SOL transfer (devnet `ahYCpEPMJV9umftwL6EFH4qCH67M7i6zuG4U4onxHoGkyjoqzTmuRRuWN4rtg2orUZzgMx7mq9iLfbWxCdGT6xQ`)
+  and an SPL `TransferChecked` (devnet `3Kz2cSWxRcFR3teYw9HVhU6TTtihQLpSQCs8xtGzq73Kwq2cUgTjqgkT4QVQfwDvJxRGdQ6zsDR2kHUHsZH2Xg8p`),
+  each landing the exact amount, measured from the transaction's own pre/post balances. Owner- and
+  agent-gated **function calls** and MPC signing need no access key on this account, which is why
+  locking it does not disarm it.
+* **No state moved.** Lifetime counters, the agent policy field by field, and both mint rules read
+  identically before and after, with the single expected delta being the transfers just described.
+
+The older `leash-locked-7f0c6d.testnet` remains in the record as the account the locked-vs-unlocked
+**attack experiment** was run on. It is locked on *superseded* code — it predates the WL-CL-020
+renewal fix and carries that defect permanently, which is itself a demonstration of why the lock
+must come last. `leash-b0c503d6` is locked on code that is fixed, byte-reproducible on an
+independent machine, and receipted.
 
 And trust **moves**, it does not vanish: signatures come from an MPC committee measured at
 **11-of-16** (`v1.signer.state`, epoch 14, block 222869350, read 2026-11-03). Leash removes
@@ -126,7 +145,7 @@ Targets NEAR **testnet** (`v1.signer-prod.testnet`).
 | | |
 |---|---|
 | Policy core + Solana message builder | implemented, **72 unit tests**, mutation-checked |
-| Contract deployed | `leash-b0c503d6.testnet` — **still holds 1 full-access key; see Custody status** |
+| Contract deployed | `leash-b0c503d6.testnet` — 458,248 B, `59HB5memEzCQMXoWe6mD7KX3ysvYMZoVBHPXVyt4tr64`, **locked 2026-11-11: 0 access keys** |
 | Leash's Solana address | `Gqa8HZcVBJ8oHGbUDCxU1DFVfimNKxF1w3jJY9kx5DUL` |
 | Live Ed25519 signature from the MPC | **executed and cryptographically verified** |
 | Transfer landed on Solana devnet | **yes** — finalized in 2 s, payee received exactly 1,000,000 lamports |
@@ -134,6 +153,7 @@ Targets NEAR **testnet** (`v1.signer-prod.testnet`).
 | Refusals recorded on chain | **yes** — returned as a verdict and written to a bounded ring, not reverted |
 | Agent enumeration + lifetime counters | `list_agents`, `get_totals`, `get_recent` |
 | Locked-account proof | **done, 15/15** — attack demonstrated on an unlocked account, refused by the chain on a locked one (`leash-locked-7f0c6d.testnet`, **0 keys**) |
+| Main contract locked | **yes, 2026-11-11** — `leash-b0c503d6.testnet` 1 → **0** keys (tx `DFG8xfJR…`); redeploy of different bytes then refused BY THE CHAIN with the key file still on disk; both money paths re-run after the lock and still land |
 | Session expiry | live, two-sided, mutation-checked |
 | Function-call-key layer | two locks in series, two-sided |
 
