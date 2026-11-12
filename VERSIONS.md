@@ -150,6 +150,25 @@ and this time the reason is written into the file so the next edit does not rest
 live here, `verify.sh` does the asserting, and `build.sh` reports only what it just measured. The
 removal was confirmed byte-neutral by rebuilding.
 
+### How to re-derive BLIND — the exact path, because it is not obvious
+
+Three files in this repo state the expected figures, each for a reason: **this file** carries the
+claim, **`verify.sh`** has to pin the hash in order to assert it, and **`build-reproducible.sh`**
+keeps its own superseded hash so an old citation can be traced. A re-derivation is therefore blind
+only if it avoids all three. Swept with
+`git ls-files | xargs grep -ln '<bytes>\|<sha16>'` — `contract/build.sh` is clean and is the
+whole blind path:
+
+```
+git clone <repo> && cd <repo> && git checkout <commit>
+cd contract && ./build.sh          # reports ONLY what it just measured
+# report the bytes + sha256 before reading VERSIONS.md or running verify.sh
+```
+
+Then run `verify.sh` afterwards to assert against the record, never before, and say plainly in the
+report whether the figures had been seen. A leg where they had been is still worth having — it is
+*corroborated* — but only an unanchored leg can falsify the claim.
+
 ### ONE RECIPE — three scripts was the hazard
 
 This repo briefly held three remap recipes producing three different artifacts:
