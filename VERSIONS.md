@@ -114,6 +114,42 @@ got different bytes and — now that `verify.sh` correctly fails on a gap — a 
 correct tree**. `profile = "minimal"` reduces the odds; it does not stop anyone adding the component
 afterwards, which is why the recipe, not the toolchain file, has to be invariant to it.
 
+### Two machines, both rust-src states — and exactly which legs were blind
+
+**Confirmed on the build host, 2026-11-11, fresh clone at `0bffce2`, each build run singly:**
+
+| leg | bytes | sha256[:16] | scan (abs / registry / canonical std) |
+|---|---:|---|---|
+| rust-src **absent**, fixed script | 458,248 | `3d8dae96c0eea6ee` | 0 / 19 / 27 |
+| rust-src **present**, fixed script | 458,248 | `3d8dae96c0eea6ee` | 0 / 19 / 27, and `rustlib` 0, `/rust-std` 0, `/home/` 0 |
+| rust-src **present**, OLD `2b24f30` script | 457,760 | `84f9da6cbcd797e7` | reported success anyway |
+
+The component was added to the pinned 1.95.0 only and removed afterwards, with the installed-component
+list diffing clean against the before-list. **The invariance claim now holds across two machines in
+both machine states, and the control leg genuinely entered the branch** — the old script's
+457,760-byte artifact reproduced exactly on different hardware, so the defect was a property of the
+recipe and not of one host.
+
+**WHICH LEGS WERE BLIND, stated because it changes what the agreement is worth.** The the build host builder
+diffed `build.sh` to understand the recipe, and at `0bffce2` that file's comments **stated both
+figures**, so the two new legs were **not blind** — her disclosure, not my discovery. What this
+does and does not undermine:
+
+- the **canonical-form figure** (458,248 / `3d8dae96`, rust-src absent) had already been re-derived
+  **blind** on a second machine *before* any script carried it, so that leg stands unanchored;
+- the **invariance legs** (same bytes with rust-src present; the 457,760 control) are confirmed on
+  two machines with the figures visible. Byte counts are measured rather than judged, so anchoring
+  cannot manufacture them — but a non-blind re-derivation cannot rule out that a mismatch would have
+  been chased until it agreed. Recorded as *corroborated, not blind*.
+
+**The cause, and it is one I had already been taught.** Those figures were in `build.sh` because I
+put them there — the same defect the coordinator caught in `build-reproducible.sh` on 2026-11-07, when it
+echoed this file's documented hash directly beneath the one it had just computed. **A build input
+that documents its own expected output cannot be used for a blind re-derivation.** Removed again,
+and this time the reason is written into the file so the next edit does not restore it: the figures
+live here, `verify.sh` does the asserting, and `build.sh` reports only what it just measured. The
+removal was confirmed byte-neutral by rebuilding.
+
 ### ONE RECIPE — three scripts was the hazard
 
 This repo briefly held three remap recipes producing three different artifacts:

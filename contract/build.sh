@@ -48,12 +48,17 @@ RUSTC_HASH="$(rustc -vV | awk '/^commit-hash/{print $2}')"
 # CORRECTED 2026-11-11, second pass, after a POSITIVE CONTROL that the first pass never ran.
 # The first version mapped the rust-src tree to the invented token /rust-std. That is NOT the
 # canonical spelling, so it did not make the two machine states agree -- it merely gave the
-# rust-src machine a THIRD spelling. Measured, same commit, same script:
-#     rust-src ABSENT   458,248 B  3d8dae96c0eea6ee  (27 x /rustc/<hash>/ , 0 x /rust-std/)
-#     rust-src PRESENT  457,760 B  84f9da6cbcd797e7  (28 x /rust-std/)
-# and the script printed "-> reproducible" in BOTH cases, because the guard accepted either form
-# with an OR and so could not tell the two apart. The flag fired zero times on the two machines
-# that agreed, which is exactly why their agreement could not detect this.
+# rust-src machine a THIRD spelling, and the artifacts differed by machine state. The script
+# reported success in BOTH cases, because the guard accepted either form with an OR and so could
+# not tell the two apart. The flag fired zero times on the two machines that had agreed on the
+# bytes, which is exactly why their agreement could not detect this.
+#
+# NO EXPECTED FIGURES LIVE IN THIS FILE, DELIBERATELY. It briefly carried the measured byte counts
+# and hashes of both legs, which is the same defect the coordinator caught in build-reproducible.sh on
+# 2026-11-07: a build input that documents its own expected output cannot be used for a BLIND
+# re-derivation, because whoever diffs the script to understand the recipe is anchored by it. The
+# numbers live in VERSIONS.md; verify.sh does the asserting; this script reports only what it just
+# measured. Three jobs, three places.
 # THE FIX: map the rust-src tree onto the CANONICAL token the shipped std rlib already carries,
 # /rustc/<40-hex-commit>, which `rustc -vV` reports and which is identical on any machine running
 # the same pinned rustc. Then both machine states emit the same strings and the bytes agree.
