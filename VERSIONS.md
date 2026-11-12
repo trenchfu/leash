@@ -1,9 +1,90 @@
 # Versions
 
 Every tag maps to a crate version, an exact dependency pin, the build flags, and the on-chain
-artifact it corresponds to. Figures below were re-read from `rpc.testnet.near.org` at block
-276550495 / 276550502 and the sha256 was re-derived from the returned bytes, not copied from the
-RPC's own `code_hash` field (the two agree).
+artifact it corresponds to. Figures below were re-read from `rpc.testnet.near.org` and the sha256
+was re-derived from the returned bytes, not copied from the RPC's own `code_hash` field (the two
+agree).
+
+> **READ THIS FIRST — 2026-11-11.** `leash-b0c503d6.testnet` was **redeployed** with the WL-CL-020
+> fix, shipping the **reproducible** build. For the first time the deployed artifact and this tree
+> are byte-identical **for anyone**, so `./verify.sh` now asserts IDENTICAL and fails on a gap
+> instead of explaining one. Everything below about a non-reproducible deployed artifact is
+> **history**, kept deliberately — it describes the artifact that was replaced. The live figures are
+> in *Deployed 2026-11-11* immediately below.
+
+## Deployed 2026-11-11 — the reproducible build
+
+| field | value |
+|---|---|
+| account | `leash-b0c503d6.testnet` (testnet dev contract) |
+| bytes | **458,248** |
+| sha256 | `3d8dae96c0eea6ee999c333031ae9b6152174c017830046cf7737a1eae91bf11` |
+| code hash (base58) | `59HB5memEzCQMXoWe6mD7KX3ysvYMZoVBHPXVyt4tr64` |
+| source | `9a05275` + `2b24f30` on `fix/wlcl020-renewal-preserves-enabled` (fix itself: `61023ca`) |
+| recipe | `contract/build.sh` — the ONLY recipe; `verify.sh` runs the same script |
+| toolchain | `1.95.0` via `rust-toolchain.toml`, `profile = "minimal"` |
+| replaced | `FksLFKoeD6Xco1D9omAQ2hrhczMwNjVnt27T2u89kkbt`, 459,050 B, deployed 2026-11-05 |
+
+**Re-derived on two machines before it was deployed.** the dev host and the build host independently produced
+458,248 bytes and the same sha256 from the same commits, on different hardware and different
+`$CARGO_HOME` paths. The deploy tool refuses any artifact whose hash is not the re-derived one, so
+a binary nobody else reproduced cannot reach the chain through it.
+
+**What changed functionally: one thing.** `set_agent_policy` now carries `enabled` forward for an
+agent that already exists, and defaults it to `true` only for a new one (WL-CL-020). Previously a
+renewal silently re-enabled a deliberately disabled agent.
+
+**State was not migrated, because it did not need to be.** `struct Leash`, `enum Key` and
+`struct Policy` are byte-identical between the replaced build's evidence copy and this source,
+verified by diff rather than assumed. `get_totals`, `list_agents` and the agent policy were captured
+before the deploy and re-read after: all three UNCHANGED.
+
+**The fix was then proven ON CHAIN, not only by hash identity.** Byte identity shows the running
+code is this source; it cannot show behaviour, because the defect only manifests on a write. So the
+discriminating sequence was run against the live agent with `tools/leash_wlcl020_probe.py`:
+disable → renew re-asserting every field including the same expiry → read back → restore.
+
+```
+after disable   enabled=False
+after renewal   enabled=False     <- FIXED. Under the old build this read True.
+                per_tx_lamports / window_lamports / expires_at_ms all UNCHANGED
+restore         enabled=True      (the state the probe found; read back, not assumed)
+```
+
+The restore is installed before the mutation and runs on every exit path including an exception.
+WL-CL-020 is therefore closed **on chain**, which is what Q's "clobber fix, then lock" order
+requires before the lock.
+
+### Why the REPLACED artifact can never be re-derived — cause located, not left open
+
+`FksLFKoe…` (459,050 B) **cannot be made reproducible after the fact, and that is now a closed
+question rather than an open one.** The cause: its build machine had **rust-src installed**, so
+rustc spelled std paths as `/home/<user>/.rustup/toolchains/.../rust-src/...` instead of the
+canonical `/rustc/<40-hex>/...` that is baked into the shipped std rlib. That machine state was
+never recorded, and it is not recoverable from the artifact, the repo or the evidence package.
+Three consequences, stated plainly:
+
+- it is a **known, explained gap**, not a mystery hash;
+- the recipe **cannot be repeated by accident** — `rust-toolchain.toml` pins `profile = "minimal"`,
+  which excludes rust-src;
+- replacing it **retires the question**: the old hash now survives only in testnet tx history.
+
+The arithmetic is still not fully reconciled and is recorded as such: 15 std paths × 35 bytes = 525
+against an observed 608-byte gap, the remainder coming from differing distinct-string counts
+(15 vs 27). The *direction and cause* are established; the exact byte accounting is not.
+
+### ONE RECIPE — three scripts was the hazard
+
+This repo briefly held three remap recipes producing three different artifacts:
+
+| script | bytes | sha256[:16] | status |
+|---|---:|---|---|
+| `contract/build.sh` | 458,248 | `3d8dae96c0eea6ee` | **the one that ships, and the one `verify.sh` runs** |
+| `build-reproducible.sh` | 458,234 | `c70089857a9efaa0` | **SUPERSEDED**, now refuses to run (exit 2) |
+| `verify.sh`'s own inline flags | 458,442 | `3fe8d7b68eb53696` | **removed**; it now calls `build.sh` |
+
+A verifier with its own private recipe cannot verify the recipe that shipped. The superseded script
+is kept rather than deleted so that its hash can be *traced* if it turns up in an old note.
 
 ## v0.1.0
 
@@ -20,7 +101,7 @@ RPC's own `code_hash` field (the two agree).
 
 | account | role | bytes | code hash (base58) | sha256[:16] |
 |---|---|---:|---|---|
-| `leash-b0c503d6.testnet` | main contract | 459,050 | `FksLFKoeD6Xco1D9omAQ2hrhczMwNjVnt27T2u89kkbt` | `db40808d5b6ad22f` |
+| `leash-b0c503d6.testnet` | main contract | 459,050 | `FksLFKoeD6Xco1D9omAQ2hrhczMwNjVnt27T2u89kkbt` | `db40808d5b6ad22f` | **REPLACED 2026-11-11** — see *Deployed 2026-11-11* |
 | `leash-locked-7f0c6d.testnet` | locked snapshot (access-key-less) | 305,580 | `4iHvhQNszRYgJsU27o37okn5nZ1n9icYJ68RjaksfLYq` | `372703139fccf4e6` |
 
 ### Reproducibility status — TWO ARTIFACTS, ONLY ONE OF THEM PORTABLE
@@ -95,12 +176,12 @@ The lesson is recorded because it generalises: **a reproducibility check run onl
 machine cannot detect machine-dependence.** It is the one defect that verification from a single
 host is structurally blind to.
 
-### Recommended before the next deploy
+### Recommended before the next deploy — **DONE 2026-11-11**
 
-The pinned build is the one worth putting on chain: identical bytes for anyone with
-`rust-toolchain.toml` and no host paths leaked into a public artifact. The WL-CL-020 fix requires a
-deploy in any case, so that deploy should ship the pinned build — after which the deployed artifact
-and this tree agree for everyone, and the lock can follow. Owner-signed; not done here.
+The recommendation was: ship the reproducible build with the WL-CL-020 fix, after which the deployed
+artifact and this tree agree for everyone, and the lock can follow. **That deploy happened** —
+figures in *Deployed 2026-11-11*, `./verify.sh` now reports IDENTICAL, and the lock is the remaining
+step. The lock is irreversible and is Q's call, not taken here.
 
 ### Dependency pinning
 
