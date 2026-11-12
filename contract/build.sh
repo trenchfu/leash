@@ -45,11 +45,27 @@ RUSTC_HASH="$(rustc -vV | awk '/^commit-hash/{print $2}')"
 # So two machines, both correctly pinned to the same rustc, still produce different bytes depending
 # on whether someone ran `rustup component add rust-src`. The deployed build had it installed; this
 # machine does not, which is the only reason the first version of this script looked correct here.
-# Both spellings are mapped onto ONE token so the artifact is invariant to that component.
+# CORRECTED 2026-11-11, second pass, after a POSITIVE CONTROL that the first pass never ran.
+# The first version mapped the rust-src tree to the invented token /rust-std. That is NOT the
+# canonical spelling, so it did not make the two machine states agree -- it merely gave the
+# rust-src machine a THIRD spelling. Measured, same commit, same script:
+#     rust-src ABSENT   458,248 B  3d8dae96c0eea6ee  (27 x /rustc/<hash>/ , 0 x /rust-std/)
+#     rust-src PRESENT  457,760 B  84f9da6cbcd797e7  (28 x /rust-std/)
+# and the script printed "-> reproducible" in BOTH cases, because the guard accepted either form
+# with an OR and so could not tell the two apart. The flag fired zero times on the two machines
+# that agreed, which is exactly why their agreement could not detect this.
+# THE FIX: map the rust-src tree onto the CANONICAL token the shipped std rlib already carries,
+# /rustc/<40-hex-commit>, which `rustc -vV` reports and which is identical on any machine running
+# the same pinned rustc. Then both machine states emit the same strings and the bytes agree.
+if ! printf '%s' "$RUSTC_HASH" | grep -qE '^[0-9a-f]{40}$'; then
+  echo "build.sh: REFUSED -- rustc -vV gave no 40-hex commit-hash (got '${RUSTC_HASH}')." >&2
+  echo "build.sh: that hash IS the canonical std path token, so it cannot be constructed." >&2
+  exit 1
+fi
 export RUSTFLAGS="--cfg near \
  --remap-path-prefix=${CH}/registry=/cargo-registry \
  --remap-path-prefix=${CH}/git=/cargo-git \
- --remap-path-prefix=${SYSROOT}/lib/rustlib/src/rust=/rust-std \
+ --remap-path-prefix=${SYSROOT}/lib/rustlib/src/rust=/rustc/${RUSTC_HASH} \
 "
 echo "build.sh: CARGO_HOME=${CH}"
 echo "build.sh: RUSTFLAGS=${RUSTFLAGS}"
@@ -68,9 +84,17 @@ if [ "$LEAK" != "0" ]; then
 fi
 # Positive control: the remap must have ACTUALLY fired, not silently matched nothing.
 MAPPED=$(strings -a "$W" | grep -c '/cargo-registry' || true)
-# The std paths must be in ONE of the two machine-independent forms, and present either way:
-# zero of both would mean the scan above matched nothing and proved nothing.
-MAPSTD=$(strings -a "$W" | grep -c '/rust-std\|/rustc/' || true)
+# The std paths must be in the CANONICAL form. This used to accept '/rust-std' OR '/rustc/',
+# which is why it passed on a rust-src machine whose bytes differed: a guard that accepts both
+# spellings cannot detect the disagreement BETWEEN them. Only /rustc/<hash> counts now, and any
+# surviving /rust-std is a hard refusal.
+MAPSTD=$(strings -a "$W" | grep -c "/rustc/${RUSTC_HASH}/" || true)
+STRAY=$(strings -a "$W" | grep -c '/rust-std' || true)
+if [ "$STRAY" != "0" ]; then
+  echo "build.sh: REFUSED -- $STRAY path(s) still spelled /rust-std. The sysroot remap pointed at" >&2
+  echo "build.sh: the wrong token, so this artifact will not match one built without rust-src." >&2
+  exit 1
+fi
 if [ "$MAPPED" = "0" ]; then
   echo "build.sh: REFUSED -- no remapped path found. Zero absolute paths AND zero remapped paths" >&2
   echo "build.sh: means the check proved nothing: the scan may simply have matched nothing." >&2
@@ -90,8 +114,9 @@ echo "build.sh: bytes     $SZ"
 echo "build.sh: sha256    $SHA"
 echo "build.sh: code_hash $B58"
 if [ "$MAPSTD" = "0" ]; then
-  echo "build.sh: REFUSED -- no /rust-std or /rustc/ path found. The std paths are unaccounted" >&2
+  echo "build.sh: REFUSED -- no /rustc/${RUSTC_HASH}/ path found. The std paths are unaccounted" >&2
   echo "build.sh: for, so the clean scan above proves nothing." >&2
   exit 1
 fi
-echo "build.sh: embedded absolute paths 0, remapped registry $MAPPED, std paths $MAPSTD -> reproducible"
+echo "build.sh: embedded absolute paths 0, remapped registry $MAPPED, canonical std paths $MAPSTD"
+echo "build.sh: rust-src $([ -d "${SYSROOT}/lib/rustlib/src/rust/library" ] && echo PRESENT || echo absent) -> reproducible either way (controlled 2026-11-11)"

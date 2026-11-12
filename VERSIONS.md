@@ -73,6 +73,47 @@ The arithmetic is still not fully reconciled and is recorded as such: 15 std pat
 against an observed 608-byte gap, the remainder coming from differing distinct-string counts
 (15 vs 27). The *direction and cause* are established; the exact byte accounting is not.
 
+### rust-src is a build input, and the first fix for it pointed at the wrong token
+
+**Found 2026-11-11, second pass, by a positive control the first pass never ran.** The deployed
+artifact is unchanged and needs no redeploy — but the *reproducibility claim* about it was false for
+a large class of machines, and `build.sh` printed `-> reproducible` while it was false.
+
+rustc spells std source paths two ways depending on an **optional component**:
+
+| machine state | spelling | artifact under the FIRST fix |
+|---|---|---:|
+| rust-src **absent** | `/rustc/<40-hex-commit>/library/...` (canonical, in the shipped rlib) | 458,248 B `3d8dae96c0eea6ee` |
+| rust-src **present** | `$SYSROOT/lib/rustlib/src/rust/library/...` | **457,760 B** `84f9da6cbcd797e7` |
+
+The first fix remapped the rust-src tree to an **invented** token, `/rust-std`. That did not make the
+two states agree — it gave the rust-src machine a *third* spelling. And the guard accepted
+`/rust-std` **OR** `/rustc/`, so it could not tell the two apart and passed either way.
+
+**Why two independent machines agreeing did not catch it:** neither had rust-src installed, so the
+sysroot flag **fired zero times on both**. Their agreement was real and told us nothing about this
+flag. A control that never executes the branch it guards is not a control —
+the agreement was over a code path that was never taken.
+
+**THE FIX:** remap the rust-src tree onto the **canonical** token the shipped std rlib already
+carries, `/rustc/<40-hex-commit>`, which `rustc -vV` reports and which is identical on any machine
+running the same pinned rustc. `RUSTC_HASH` was already being computed in `build.sh` and never used.
+The guard now counts **only** the canonical form and **hard-refuses** any surviving `/rust-std`.
+
+**TWO-SIDED CONTROL, measured on this machine by installing and removing the component:**
+
+```
+rust-src PRESENT, old script   457,760 B  84f9da6cbcd797e7   <- the hazard, reported "reproducible"
+rust-src PRESENT, fixed script 458,248 B  3d8dae96c0eea6ee   <- matches the chain
+rust-src ABSENT,  fixed script 458,248 B  3d8dae96c0eea6ee   <- matches the chain
+```
+
+**Why this mattered in practice:** `rustup component add rust-src` is what **rust-analyzer** needs,
+so a large share of ordinary developers have it. Under the old recipe every one of them would have
+got different bytes and — now that `verify.sh` correctly fails on a gap — a **REAL FAILURE on a
+correct tree**. `profile = "minimal"` reduces the odds; it does not stop anyone adding the component
+afterwards, which is why the recipe, not the toolchain file, has to be invariant to it.
+
 ### ONE RECIPE — three scripts was the hazard
 
 This repo briefly held three remap recipes producing three different artifacts:
