@@ -6,8 +6,8 @@
 # source paths in its data section -- panic-location strings of the form
 #   /home/<user>/.cargo/registry/src/index.crates.io-<hash>/<crate>/src/<file>.rs
 # so the BUILDING USER'S HOME DIRECTORY ends up inside the wasm. Measured on one commit, same rustc
-# 1.95.0, same LLVM 22.1.2, same Cargo.lock under --locked: <home> (10 chars) gave 458,456 bytes
-# and a peer's <home> (11 chars) gave 458,472. Nineteen paths one byte longer each, minus
+# 1.95.0, same LLVM 22.1.2, same Cargo.lock under --locked: /home/<user-a> (10 chars) gave 458,456 bytes
+# and a peer's /home/<user-b> (11 chars) gave 458,472. Nineteen paths one byte longer each, minus
 # string dedup and LEB128 length encoding, is that 16-byte delta.
 #
 # It was found ONLY because the re-derivation was done blind on a second host. A reproducibility

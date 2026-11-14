@@ -30,9 +30,9 @@ GUARDS: testnet only, leash-*.testnet only, refuses if the live code_hash is not
 (a probe against unknown code proves nothing), refuses if the agent is already disabled (then the
 sequence has no clean restore point), dry run by default.
 """
-import json, re, subprocess, sys, time, urllib.request
+import json, os, re, shutil, subprocess, sys, time, urllib.request
 
-NEAR = "<home>/.local/bin/near"
+NEAR = os.environ.get("NEAR_CLI") or shutil.which("near") or "near"
 RPC = "https://rpc.testnet.near.org"
 CONTRACT = "leash-b0c503d6.testnet"
 AGENT = "leash-agent-064e6c.testnet"

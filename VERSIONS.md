@@ -25,7 +25,7 @@ agree).
 | toolchain | `1.95.0` via `rust-toolchain.toml`, `profile = "minimal"` |
 | replaced | `FksLFKoeD6Xco1D9omAQ2hrhczMwNjVnt27T2u89kkbt`, 459,050 B, deployed 2026-11-05 |
 
-**Re-derived on two machines before it was deployed.** the dev host and the build host independently produced
+**Re-derived on two machines before it was deployed.** Two builders, on separate machines, independently produced
 458,248 bytes and the same sha256 from the same commits, on different hardware and different
 `$CARGO_HOME` paths. The deploy tool refuses any artifact whose hash is not the re-derived one, so
 a binary nobody else reproduced cannot reach the chain through it.
@@ -116,7 +116,7 @@ afterwards, which is why the recipe, not the toolchain file, has to be invariant
 
 ### Two machines, both rust-src states — and exactly which legs were blind
 
-**Confirmed on the build host, 2026-11-11, fresh clone at `0bffce2`, each build run singly:**
+**Confirmed on the second machine, 2026-11-11, fresh clone at `0bffce2`, each build run singly:**
 
 | leg | bytes | sha256[:16] | scan (abs / registry / canonical std) |
 |---|---:|---|---|
@@ -130,7 +130,7 @@ both machine states, and the control leg genuinely entered the branch** — the 
 457,760-byte artifact reproduced exactly on different hardware, so the defect was a property of the
 recipe and not of one host.
 
-**WHICH LEGS WERE BLIND, stated because it changes what the agreement is worth.** The the build host builder
+**WHICH LEGS WERE BLIND, stated because it changes what the agreement is worth.** The second builder
 diffed `build.sh` to understand the recipe, and at `0bffce2` that file's comments **stated both
 figures**, so the two new legs were **not blind** — her disclosure, not my discovery. What this
 does and does not undermine:
