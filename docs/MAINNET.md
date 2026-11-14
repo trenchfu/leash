@@ -13,26 +13,28 @@ account ids below are from [`VERSIONS.md`](../VERSIONS.md); treat that file as t
 
 | account (testnet) | role | notes |
 |---|---|---|
-| `leash-b0c503d6.testnet` | main development contract | still holds **1 full-access key** — policy is not yet a custody boundary on this account |
+| `leash-b0c503d6.testnet` | main development contract | **zero** access keys — locked 2026-11-11 in tx `DFG8xfJR6TMar32CGWG31GE4T6JpZMWVQJk6ydsghmGW`; the policy IS a custody boundary on this account |
 | `leash-locked-7f0c6d.testnet` | locked snapshot | **zero** access keys; custody demonstration account |
 | MPC signer | `v1.signer-prod.testnet` | measured 11-of-16 (see README / VERIFIED-FACTS) |
 
-Pinned portable rebuild (what you should put on chain next): **458,234 bytes**, sha256 prefix
-`c70089857a9efaa0` — produced by `./build-reproducible.sh`. The currently deployed testnet artifact
-is an older, host-path-embedded build and is **not** byte-identical to the portable rebuild; see
-VERSIONS.md.
+Pinned reproducible build: **458,248 bytes**, sha256 prefix `3d8dae96c0eea6ee` — produced by
+`./contract/build.sh`, the only recipe. Since the 2026-11-11 redeploy the deployed testnet artifact
+**IS** byte-identical to this rebuild, and `./verify.sh` asserts that identity rather than
+explaining a gap. The older `458,234 B` / `c70089857a9efaa0` figure belonged to
+`build-reproducible.sh`, a different remap recipe that is now superseded and refuses to run; it
+matches nothing deployed. See VERSIONS.md.
 
 ## Build reproducibly and verify a code hash
 
 ```bash
-# Produce the portable wasm (no host paths in the artifact)
-./build-reproducible.sh
+# Produce the reproducible wasm (no host paths in the artifact)
+./contract/build.sh
 
 # Assert the local rebuild matches the portable hash claimed in VERSIONS.md.
 # Full ./verify.sh also hits testnet RPC (view_code / access keys); skip that
 # offline, or run only the local build + sha256 check yourself:
 sha256sum contract/target/wasm32-unknown-unknown/release/leash.wasm
-# expect prefix: c70089857a9efaa0  (full digest in VERSIONS.md)
+# expect prefix: 3d8dae96c0eea6ee  (full digest in VERSIONS.md)
 ```
 
 To compare against a **deployed** account's code (any network), fetch `view_code`, sha256 the
@@ -50,18 +52,28 @@ cd contract && cargo test
 Do **not** copy testnet account ids into mainnet commands. Replace every placeholder.
 
 1. **Create / fund** a NEAR mainnet account you control: `<ACCOUNT_ID>`.
-2. **Build** the portable artifact: `./build-reproducible.sh`.
-3. **Deploy** the wasm to `<ACCOUNT_ID>` (near-cli or equivalent), then call `new` with:
+2. **Build** the reproducible artifact: `./contract/build.sh`.
+3. **Deploy** the wasm to `<ACCOUNT_ID>` (near-cli or equivalent) and assemble the `new`
+   arguments — but do not send `new` until step 4 has passed:
    - `owner`: `<OWNER_ACCOUNT_ID>`
    - `mpc_contract`: the mainnet Chain Signatures signer account id for your intended domain
      (confirm against current NEAR docs / `v1.signer` mainnet state — do not assume the testnet id)
    - `derivation_path`: e.g. `solana-1` (must match how you derive / publish the Solana address)
    - `solana_address`: `<SOLANA_ADDRESS>` derived for `(<ACCOUNT_ID>, <path>)` under that MPC
-4. **Set agent policy** (owner only) — see below.
-5. **Fund** the derived Solana address on the Solana cluster you intend to pay on.
-6. **Lock** the NEAR account (delete every full-access key) **only after** the last intended code
+4. **Verify the derived address BEFORE you call `new`, and treat a mismatch as a stop.** `new`
+   only checks that `solana_address` decodes to a 32-byte base58 key — it does **not** check that
+   the value is the address the MPC will actually sign for. Derive it yourself from the **mainnet**
+   signer for that exact `(<ACCOUNT_ID>, <path>)` pair and compare. The derivation is a function of
+   the signer's root key, the predecessor account id and the path, and **all three change between
+   networks** — the mainnet `v1.signer` root key differs from `v1.signer-prod.testnet`'s, so a
+   testnet-derived address is never valid on mainnet. Step 7 deletes every full-access key, and a
+   locked account cannot be redeployed, so a wrong `solana_address` becomes **permanent** at that
+   point. Once the derived address matches, send `new`.
+5. **Set agent policy** (owner only) — see below.
+6. **Fund** the derived Solana address on the Solana cluster you intend to pay on.
+7. **Lock** the NEAR account (delete every full-access key) **only after** the last intended code
    change. A locked account cannot be upgraded. Until then, the policy is not a custody boundary.
-7. **Record** the deployed sha256 / code hash in your own runbook (this repo's VERSIONS.md is the
+8. **Record** the deployed sha256 / code hash in your own runbook (this repo's VERSIONS.md is the
    testnet record).
 
 Example shape (illustrative; tool flags change — check your CLI):
