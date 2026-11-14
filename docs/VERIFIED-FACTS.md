@@ -26,7 +26,7 @@ Accounts created for this build (NEAR testnet, no real funds):
 **11 of 16** participants, domains identical in layout to mainnet —
 domain **1 = Frost / Ed25519 / Sign**. Checked rather than assumed to match mainnet.
 
-**Leash's Solana address:** `Gqa8HZcVBJ8oHGbUDCxU1DFVfimNKxF1w3jJY9kx5DUL`
+**Leash's Solana address:** `Gqa8HZcVBJ8oHGbUDCxU1DFVfimNKxF1w3jJY9kx5DUL` (testnet contract, devnet only: do not send mainnet funds here)
 derived from (`leash-b0c503d6.testnet`, `solana-1`, domain 1).
 
 ### The exclusivity claim, measured rather than inferred
@@ -47,7 +47,7 @@ key**. It cannot reach Leash's address. A vs C shows the path is also bound. **D
 
 ## Threat model additions from an independent blind review (2026-11-03)
 
-Q commissioned a separate research pass that did not know what this project had built. Two of its
+The owner commissioned a separate research pass that did not know what this project had built. Two of its
 findings are material to Leash's threat model and were NOT in my own research:
 
 - **NEAR Intents / HOT Bridge incident, 2026-09-29 to 10-01.** A refund/notification flaw created

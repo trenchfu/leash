@@ -153,7 +153,7 @@ Targets NEAR **testnet** (`v1.signer-prod.testnet`).
 |---|---|
 | Policy core + Solana message builder | implemented, **72 unit tests**, mutation-checked |
 | Contract deployed | `leash-b0c503d6.testnet` — 458,248 B, `59HB5memEzCQMXoWe6mD7KX3ysvYMZoVBHPXVyt4tr64`, **locked 2026-11-11: 0 access keys** |
-| Leash's Solana address | `Gqa8HZcVBJ8oHGbUDCxU1DFVfimNKxF1w3jJY9kx5DUL` |
+| Leash's Solana address | `Gqa8HZcVBJ8oHGbUDCxU1DFVfimNKxF1w3jJY9kx5DUL` (testnet contract, devnet only: do not send mainnet funds here) |
 | Live Ed25519 signature from the MPC | **executed and cryptographically verified** |
 | Transfer landed on Solana devnet | **yes** — finalized in 2 s, payee received exactly 1,000,000 lamports |
 | Refusals proven against the live contract | `harness/prove_the_jail.py` |

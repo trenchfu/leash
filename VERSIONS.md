@@ -52,7 +52,7 @@ restore         enabled=True      (the state the probe found; read back, not ass
 ```
 
 The restore is installed before the mutation and runs on every exit path including an exception.
-WL-CL-020 is therefore closed **on chain**, which is what Q's "clobber fix, then lock" order
+WL-CL-020 is therefore closed **on chain**, which is what the owner's "clobber fix, then lock" order
 requires before the lock.
 
 ### Why the REPLACED artifact can never be re-derived — cause located, not left open
@@ -287,7 +287,7 @@ host is structurally blind to.
 The recommendation was: ship the reproducible build with the WL-CL-020 fix, after which the deployed
 artifact and this tree agree for everyone, and the lock can follow. **That deploy happened** —
 figures in *Deployed 2026-11-11*, `./verify.sh` now reports IDENTICAL, and the lock is the remaining
-step. The lock is irreversible and is Q's call, not taken here.
+step. The lock is irreversible and is the owner's call, not taken here.
 
 ### Dependency pinning
 

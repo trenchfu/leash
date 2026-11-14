@@ -10,7 +10,7 @@ A reviewer should be able to reach a verdict from the first two tiers alone.
 ## Tier 1 — runs offline, no keys, no network
 
 ```bash
-./verify.sh          # all three tiers below, one command
+./verify.sh          # Tiers 1-2 below, one command (Tier 3 needs keys)
 cd contract && cargo test   # or just the offline suite
 ```
 
@@ -42,7 +42,7 @@ curl -s -X POST https://rpc.testnet.near.org -H 'content-type: application/json'
 | contract deployed | `leash-b0c503d6.testnet` | `view_code` → 458,248 bytes, hash `59HB5memEzCQMXoWe6mD7KX3ysvYMZoVBHPXVyt4tr64` (redeployed 2026-11-11 as the reproducible build; the previous 459,050 B / `FksLFKoe…` artifact is superseded and is **not** re-derivable — see VERSIONS.md) |
 | the account is **locked** | `leash-locked-7f0c6d.testnet` | `view_access_key_list` → **zero** `FullAccess` keys |
 | the MAIN contract is **locked** | `leash-b0c503d6.testnet` | `view_access_key_list` → **zero** keys of any kind, since 2026-11-11 (tx `DFG8xfJR6TMar32CGWG31GE4T6JpZMWVQJk6ydsghmGW`) |
-| Leash's Solana address | `Gqa8HZcVBJ8oHGbUDCxU1DFVfimNKxF1w3jJY9kx5DUL` | Solana **devnet** account history |
+| Leash's Solana address | `Gqa8HZcVBJ8oHGbUDCxU1DFVfimNKxF1w3jJY9kx5DUL` | Solana **devnet** account history (devnet only: do not send mainnet funds here) |
 | the MPC signer | `v1.signer-prod.testnet` | `state` → committee threshold |
 
 The locked-account check is the one that matters most, and it is the one you should not take on

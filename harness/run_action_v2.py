@@ -75,7 +75,7 @@ def near_rpc(method, params):
 
 
 def blockhash():
-    # 11-05 (Cleo): was "finalized", which hands back a hash already ~32 slots behind the tip and so
+    # 11-05: was "finalized", which hands back a hash already ~32 slots behind the tip and so
     # burns a fifth of the 150-slot validity window BEFORE the MPC round-trip (a NEAR call plus up to
     # 8x2s of signature polling) even starts. Task 2 of the action-leash-sol run lost that race with
     # BlockhashNotFound while task 1 won it -- one-sided luck, not method. "confirmed" is as near the
@@ -169,7 +169,7 @@ def run_legs(escrow, task_id, fixture):
     prov, esc, buy, cfg, fix = (S.b58decode(x) for x in (LEASH, escrow, BUYER, CONFIG, fixture))
 
     bh = blockhash()
-    # 11-05 (Cleo): an accept leg that already landed must not be re-sent -- the program refuses the
+    # 11-05: an accept leg that already landed must not be re-sent -- the program refuses the
     # second accept and the task would abort before the transfer it still owes.
     if SKIP_ACCEPT:
         print("    [1 accept_task] SKIPPED (already landed; LEASH_SKIP_ACCEPT=1)")

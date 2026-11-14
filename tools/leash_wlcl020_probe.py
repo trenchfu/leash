@@ -5,7 +5,7 @@ WHY THIS EXISTS. The deploy of 2026-11-11T22:1xZ proved BYTE IDENTITY: the runni
 base58(sha256()) of the artifact built from the fixed source, and two machines re-derived that
 artifact. What byte identity cannot show is BEHAVIOUR: the fix only manifests on a WRITE, so no view
 call can distinguish the fixed contract from the buggy one. Six unit tests cover it off chain. This
-covers it ON chain, which is the only place Q's "clobber fix then lock" order is actually satisfied.
+covers it ON chain, which is the only place the owner's "clobber fix then lock" order is actually satisfied.
 
 THE DISCRIMINATING SEQUENCE, against the LIVE agent:
   1. read the live policy and keep EVERY field.
