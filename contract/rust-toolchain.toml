@@ -1,12 +1,25 @@
 # Pin the compiler, not just the dependencies.
 #
-# The deployed artifact at leash-b0c503d6.testnet (459,050 bytes, sha256 db40808d...b30b) is
-# reproducible under THIS compiler. It is not reproducible under an arbitrary newer rustc:
-# a 1.99.1 build of this same source yields 525,860 bytes. Pinning near-sdk fixed the
-# dependency graph; it could not fix the codegen.
+# A newer rustc on this same source produces a materially different artifact: pinning near-sdk fixes
+# the dependency graph and cannot fix the codegen. So the channel below is load-bearing and must be
+# changed deliberately, not drifted into.
 #
-# Found by a peer re-deriving the claim on a different machine rather than accepting it --
-# which is the only reason it was caught before a judge ran verify.sh.
+# TWO THINGS THIS FILE DELIBERATELY NO LONGER SAYS, both corrected 2026-11-11:
+#
+# 1. It used to claim the deployed artifact "is reproducible under THIS compiler". That is FALSE as
+#    stated. A plain cargo build is reproducible on ONE MACHINE and not across machines: the wasm
+#    carries absolute dependency source paths from the building user's cargo registry, so the
+#    builder's home directory ends up inside the artifact. Use ./build.sh, which remaps those paths
+#    and REFUSES if any absolute path survives. The comment that was here would have sent a verifier
+#    to the wrong conclusion on their own box.
+#
+# 2. It used to state the expected byte count and sha256 of the deployed artifact, inside a file that
+#    every builder must read. **A build input that documents its own expected output cannot be used
+#    for a blind re-derivation** -- the peer who re-derived this on 2026-11-11 disclosed, correctly,
+#    that they had seen a prior number before building. Expected artifacts and their receipts belong
+#    in VERSIONS.md, which nobody needs to read in order to compile.
+#
+# Verify a deployment by building with ./build.sh and comparing to VERSIONS.md, in that order.
 [toolchain]
 channel = "1.95.0"
 targets = ["wasm32-unknown-unknown"]

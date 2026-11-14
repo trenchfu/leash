@@ -427,14 +427,27 @@ impl Leash {
             require!(solana::decode_pubkey(r).is_some(), "allowlist entry is not a valid address");
         }
         let existing = self.agents.get(&agent);
-        let (spent, started) = match existing {
-            Some(p) => (p.spent_in_window, p.window_started_ms),
-            None => (0, env::block_timestamp_ms()),
+        // WL-CL-020, fixed 2026-11-11. `enabled` is CARRIED FORWARD for an agent that already
+        // exists, and defaults to true only for a NEW one. It used to be hardcoded `true` here,
+        // which made a renewal silently undo the owner's own `set_agent_enabled(false)`: a disable
+        // could not survive the next policy renewal, and renewals are routine because the session
+        // expiry is what forces them. Found the hard way -- the live testnet policy lapsed on
+        // 2026-11-10 and renewing it on 2026-11-11 re-armed exactly this.
+        //
+        // WHY CARRY-FORWARD RATHER THAN A NEW ARGUMENT: enabling and disabling already has its own
+        // setter (`set_agent_enabled`), so one concern gets one writer. An owner who means to
+        // re-enable says so explicitly; an owner renewing an expiry is not asked to restate a
+        // decision they already made. A record-rebuilding setter preserves only the fields it
+        // enumerates, so every field this function does not take as an argument must be listed
+        // here on purpose.
+        let (spent, started, enabled) = match existing {
+            Some(p) => (p.spent_in_window, p.window_started_ms, p.enabled),
+            None => (0, env::block_timestamp_ms(), true),
         };
         self.agents.insert(
             agent,
             Policy {
-                enabled: true,
+                enabled,
                 per_tx_lamports: per_tx_lamports.0,
                 window_lamports: window_lamports.0,
                 spent_in_window: spent,
@@ -1511,6 +1524,99 @@ mod callback_arming_tests {
         let args = callback_args("on_signed");
         assert!(args.contains(&alloc::format!("\"charged_window_ms\":\"{}\"", w)),
                 "callback args must carry the charged agent window {}: {}", w, args);
+    }
+
+    // ---- WL-CL-020: a renewal must not undo a deliberate disable ---------------------------
+
+    /// THE DEFECT ITSELF. `set_agent_policy` rebuilt the record with `enabled: true` hardcoded, so
+    /// an owner's `set_agent_enabled(false)` could not survive the next renewal -- and renewals are
+    /// routine, because the session expiry is what forces them. This is the arm the live chain
+    /// produced on 2026-11-11: the testnet policy lapsed on 11-10 and renewing it re-enabled the
+    /// agent as a side effect nobody asked for.
+    #[test]
+    fn a_renewal_does_not_re_enable_a_disabled_agent() {
+        let mut c = fresh(1_000);
+        ctx(owner(), 2_000);
+        c.set_agent_enabled(agent(), false);
+        assert!(!c.agents.get(&agent()).unwrap().enabled, "precondition: the disable landed");
+        ctx(owner(), 3_000);
+        c.set_agent_policy(agent(), 10_000_000u128.into(), 40_000_000u128.into(),
+                           alloc::vec![DEST.to_string()], 9_000u64.into());
+        assert!(!c.agents.get(&agent()).unwrap().enabled,
+                "a renewal must carry the disable FORWARD, not reset it");
+        assert_eq!(c.agents.get(&agent()).unwrap().expires_at_ms, 9_000,
+                   "and it must still renew the expiry it was actually called for");
+    }
+
+    /// TWO-SIDED CONTROL. The fix must not make every renewal land disabled -- without this arm,
+    /// `enabled: false` hardcoded would pass the test above just as well as the real fix.
+    #[test]
+    fn a_renewal_keeps_an_enabled_agent_enabled() {
+        let mut c = fresh(1_000);
+        assert!(c.agents.get(&agent()).unwrap().enabled, "precondition: enabled");
+        ctx(owner(), 3_000);
+        c.set_agent_policy(agent(), 10_000_000u128.into(), 40_000_000u128.into(),
+                           alloc::vec![DEST.to_string()], 9_000u64.into());
+        assert!(c.agents.get(&agent()).unwrap().enabled, "an enabled agent stays enabled");
+    }
+
+    /// ONBOARDING IS UNCHANGED: a FIRST policy for an unknown agent still enables it, which is the
+    /// `None` arm of the carry-forward and the reason the default could not simply be removed.
+    #[test]
+    fn a_new_agent_is_enabled_by_its_first_policy() {
+        let mut c = fresh(1_000);
+        let fresh_agent: AccountId = "agent2.testnet".parse().unwrap();
+        assert!(c.agents.get(&fresh_agent).is_none(), "precondition: unknown agent");
+        ctx(owner(), 2_000);
+        c.set_agent_policy(fresh_agent.clone(), 1_000u128.into(), 2_000u128.into(),
+                           alloc::vec![DEST.to_string()], 0u64.into());
+        assert!(c.agents.get(&fresh_agent).unwrap().enabled,
+                "a new agent's first policy still enables it");
+    }
+
+    /// THE DISABLE STAYS REVERSIBLE by its own setter after a renewal, so the fix adds no trap.
+    #[test]
+    fn set_agent_enabled_still_re_enables_after_a_renewal() {
+        let mut c = fresh(1_000);
+        ctx(owner(), 2_000);
+        c.set_agent_enabled(agent(), false);
+        ctx(owner(), 3_000);
+        c.set_agent_policy(agent(), 10_000_000u128.into(), 40_000_000u128.into(),
+                           alloc::vec![DEST.to_string()], 9_000u64.into());
+        ctx(owner(), 4_000);
+        c.set_agent_enabled(agent(), true);
+        assert!(c.agents.get(&agent()).unwrap().enabled,
+                "an explicit re-enable still works, and is now the ONLY way to re-enable");
+    }
+
+    /// THE CONSEQUENCE, NOT THE FLAG. A bool carried forward is worth nothing unless the signing
+    /// path still refuses, so this arm drives the real caller and reads the audit ring.
+    #[test]
+    fn a_disabled_then_renewed_agent_is_still_refused_end_to_end() {
+        let mut c = fresh(1_000);
+        ctx(owner(), 2_000);
+        c.set_agent_enabled(agent(), false);
+        ctx(owner(), 3_000);
+        c.set_agent_policy(agent(), 10_000_000u128.into(), 40_000_000u128.into(),
+                           alloc::vec![DEST.to_string()], 9_000u64.into());
+        charge_lam(&mut c, 5_000, 1_000_000);
+        assert_eq!(newest_detail(&c), "LEASH_REFUSED: agent disabled",
+                   "the renewed-but-disabled agent must still be refused on the signing path");
+        assert_eq!(lam_spent(&c), 0, "and a refused request must not charge the window");
+    }
+
+    /// THE FIELDS THE SETTER ALREADY CARRIED must be unaffected by adding a third to the match.
+    #[test]
+    fn a_renewal_still_preserves_spend_and_window() {
+        let mut c = fresh(1_000);
+        charge_lam(&mut c, 2_000, 10_000_000);
+        let (spent_before, window_before) = (lam_spent(&c), lam_window(&c));
+        assert_eq!(spent_before, 10_000_000, "precondition: the charge landed");
+        ctx(owner(), 3_000);
+        c.set_agent_policy(agent(), 10_000_000u128.into(), 40_000_000u128.into(),
+                           alloc::vec![DEST.to_string()], 9_000u64.into());
+        assert_eq!(lam_spent(&c), spent_before, "the spend must survive a renewal");
+        assert_eq!(lam_window(&c), window_before, "and so must the window start");
     }
 }
 

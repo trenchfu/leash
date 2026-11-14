@@ -4,7 +4,7 @@
 # Proves three things and says which is which:
 #   1. the offline policy suite passes
 #   2. this source rebuilds the EXACT bytes deployed at leash-b0c503d6.testnet
-#   3. the account holding the proven custody guarantee has ZERO access keys
+#   3. BOTH accounts -- the main contract and the attack-experiment one -- have ZERO access keys
 #
 # Needs: rust stable + wasm32-unknown-unknown, python3 (>=3.8), curl.
 set -u
@@ -30,13 +30,12 @@ say "1/3  offline policy suite"
 
 say "2/3  reproducible build vs the deployed artifact"
 TGT="$(mktemp -d)"
-# The remap flags are what make these bytes independent of where THIS machine keeps its
-# cargo registry; without them a different $CARGO_HOME gives a different artifact (measured:
-# 458,442 vs 459,714 B). --cfg near is repeated because RUSTFLAGS REPLACES the config rustflags.
-( cd "$HERE/contract" \
-  && CARGO_TARGET_DIR="$TGT" \
-     RUSTFLAGS="--cfg near --remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}=/cargo --remap-path-prefix=$HERE/contract=/src" \
-     cargo build --release --target wasm32-unknown-unknown 2>&1 | tail -1 )
+# ONE RECIPE, 2026-11-11. This used to carry its own inline --remap-path-prefix flags, which made
+# THREE scripts in this repo with three different remaps and three different artifacts
+# (458,234 / 458,248 / 458,442). A verifier with its own private recipe cannot verify the recipe
+# that actually shipped, so this now runs contract/build.sh -- the same script whose output was
+# deployed -- and build.sh owns the flags, the guards and the positive controls.
+( cd "$HERE/contract" && CARGO_TARGET_DIR="$TGT" ./build.sh 2>&1 | tail -3 )
 LOCAL_WASM="$TGT/wasm32-unknown-unknown/release/leash.wasm"
 if [ ! -f "$LOCAL_WASM" ]; then echo "BUILD FAILED"; fail=1; else
   "$PY" - "$RPC" "$CONTRACT" "$LOCAL_WASM" <<'PY'
@@ -51,29 +50,41 @@ res = json.load(urllib.request.urlopen(req, timeout=60))["result"]
 chain = base64.b64decode(res["code_base64"])
 local = open(path, "rb").read()
 ch, lh = hashlib.sha256(chain).hexdigest(), hashlib.sha256(local).hexdigest()
-DEPLOYED_SHA = "db40808d5b6ad22f733f2ff674d91913af1eb21a2e81a5f41e4012816922b30b"
-# The REMAPPED build's hash. The earlier 3fe8d7b6... was the plain pinned build, which carries
-# 19 absolute $CARGO_HOME paths and is NOT portable -- retracted in VERSIONS.md 2026-11-07.
-PORTABLE_SHA = "c70089857a9efaa0" 
+# REDEPLOYED 2026-11-11: the WL-CL-020 fix went on chain as the REPRODUCIBLE build, so the
+# deployed artifact and this tree now agree for everyone, and this check asserts IDENTICAL
+# instead of explaining a gap. Two independent machines re-derived these bytes.
+DEPLOYED_SHA = "3d8dae96c0eea6ee999c333031ae9b6152174c017830046cf7737a1eae91bf11"
+EXPECT_BYTES = 458248
+# Superseded, kept so a stale citation elsewhere can be traced rather than puzzled over:
+#   db40808d...b30b / 459,050 B -- the artifact deployed 2026-11-05, NOT re-derivable by anyone
+#     (its build machine had rust-src installed; that state was never recorded). Replaced.
+#   c70089857a9efaa0 / 458,234 B -- build-reproducible.sh, a different remap recipe. Superseded.
+#   3fe8d7b6...       / 458,442 B -- the plain pinned build, 19 host paths. Retracted 2026-11-07.
 print("   deployed %7d bytes  sha256 %s" % (len(chain), ch))
 print("   rebuilt  %7d bytes  sha256 %s" % (len(local), lh))
 if ch == lh:
     print("   IDENTICAL -- the deployed artifact is this build")
-    sys.exit(0)
-print("   DIFFERENT, AND EXPECTED. The deployed artifact predates the toolchain pin and")
-print("   embeds absolute paths from its build machine, so only that machine can reproduce")
-print("   it. This rebuild is the REMAPPED one: byte-identical from two different $CARGO_HOME")
-print("   paths, with no /home, /Users or /root string left in it. See VERSIONS.md.")
-ok = ch == DEPLOYED_SHA and lh.startswith(PORTABLE_SHA)
+    # Identical is necessary but not sufficient: both could be some OTHER build. Pin both to the
+    # documented figures, so this cannot pass against an artifact nobody re-derived.
+    pinned = (ch == DEPLOYED_SHA and len(chain) == EXPECT_BYTES)
+    print("   matches the DOCUMENTED hash and byte count (%d): %s" % (EXPECT_BYTES, pinned))
+    if not pinned:
+        print("   *** the chain and this tree agree with EACH OTHER but not with VERSIONS.md.")
+        print("   *** Either the docs are stale or both sides moved together. Do not trust either")
+        print("   *** until VERSIONS.md is re-derived. Failing closed.")
+    sys.exit(0 if pinned else 1)
+print("   DIFFERENT -- and since 2026-11-11 that is a REAL FAILURE, not an expected gap.")
+print("   The deployed artifact IS this reproducible build; if these disagree then the tree,")
+print("   the toolchain or the deployed code has moved. Expected sha256 %s" % DEPLOYED_SHA)
 print("   deployed matches the documented hash: %s" % (ch == DEPLOYED_SHA))
-print("   rebuild  matches the documented portable hash: %s" % lh.startswith(PORTABLE_SHA))
-sys.exit(0 if ok else 1)
+print("   rebuilt  matches the documented hash: %s" % (lh == DEPLOYED_SHA))
+sys.exit(1)
 PY
   [ $? -ne 0 ] && fail=1
 fi
 rm -rf "$TGT"
 
-say "3/3  custody: the proven account must hold ZERO access keys"
+say "3/3  custody: BOTH accounts must hold ZERO access keys"
 "$PY" - "$RPC" "$LOCKED" "$CONTRACT" <<'PY'
 import json, sys, urllib.request
 rpc = sys.argv[1]
@@ -89,8 +100,12 @@ cn, cf = keys(sys.argv[3])
 print("   %-30s keys=%d FullAccess=%d  %s" % (sys.argv[2], ln, lf,
       "LOCKED" if lf == 0 else "*** NOT LOCKED ***"))
 print("   %-30s keys=%d FullAccess=%d  %s" % (sys.argv[3], cn, cf,
-      "locked" if cf == 0 else "still upgradable (stated in README: Custody status)"))
-sys.exit(0 if lf == 0 else 1)
+      "LOCKED" if cf == 0 else "*** NOT LOCKED ***"))
+# LOCKED 2026-11-11. This used to PASS while the main contract still held a full-access key, and
+# merely printed "still upgradable" -- a true statement that the exit code ignored. Now both
+# accounts must be key-less, so if anyone ever re-creates a key on either one this FAILS instead
+# of narrating it. A line that reports a weaker state without affecting the verdict is decoration.
+sys.exit(0 if (lf == 0 and cf == 0) else 1)
 PY
 [ $? -ne 0 ] && fail=1
 

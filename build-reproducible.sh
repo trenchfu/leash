@@ -1,4 +1,20 @@
 #!/usr/bin/env bash
+
+# SUPERSEDED 2026-11-11 by contract/build.sh. DO NOT USE. Kept, not deleted, so that the hash it
+# documents (458,234 B / c70089857a9efaa0) can be TRACED to a recipe rather than puzzled over if it
+# turns up in an old note or a peer's record.
+#
+# WHY IT IS WRONG NOW: this script remaps $CARGO_HOME wholesale to /cargo and the source dir to
+# /src. contract/build.sh remaps the registry and git caches separately and also handles the rustc
+# sysroot, which is the input that made the 2026-11-05 artifact non-reproducible. The two recipes
+# therefore produce DIFFERENT BYTES, and the bytes on chain since 2026-11-11 are build.sh's
+# (458,248 B / 3d8dae96...). Running this one gives an artifact that matches nothing deployed.
+#
+# Three scripts with three remaps was the hazard itself: a verifier with its own private recipe
+# cannot verify the recipe that shipped. verify.sh now calls contract/build.sh too.
+echo "build-reproducible.sh: SUPERSEDED by contract/build.sh -- see the header. Refusing to run," >&2
+echo "  because its output (458,234 B) matches no deployed artifact and would read as drift." >&2
+exit 2
 # Build the Leash contract so that the bytes do not depend on WHERE this machine keeps things.
 #
 # WHY THIS SCRIPT EXISTS, measured 2026-11-07 and not guessed: a plain `cargo build --release`
